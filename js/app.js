@@ -540,7 +540,10 @@
     const info = $('selectedInfo');
     if (ui.awardMode) {
       const names = g.players.filter((p) => ui.awardPicks.has(p.id)).map((p) => p.name);
-      info.innerHTML = names.length ? `Winner${names.length > 1 ? 's (split)' : ''}: <b>${esc(names.join(', '))}</b> — press Confirm` : 'Tap the winning seat(s), then Confirm';
+      const side = S.game.lastAward && S.game.lastAward.sidePot > 0 && S.game.pot === S.game.lastAward.sidePot;
+      info.innerHTML = names.length
+        ? `Winner${names.length > 1 ? 's (split)' : ''}: <b>${esc(names.join(', '))}</b> — press Confirm`
+        : side ? `Side pot <b>${esc(fmt(S.game.pot))}</b>: tap its winner, then Confirm` : 'Tap the winning seat(s), then Confirm — tap several to split';
     } else if (sel) {
       const toCall = Math.max(0, ...g.players.map((p) => p.bet)) - sel.bet;
       info.innerHTML = `<b>${esc(sel.name)}</b> · stack ${esc(fmt(sel.stack))}` + (toCall > 0 ? ` · to call ${esc(fmt(Math.min(toCall, sel.stack)))}` : '');
@@ -740,15 +743,24 @@
   }
 
   function awardTo(ids) {
-    const amt = E.potTotal(S.game);
     pushUndo();
     S.game = E.awardPot(S.game, ids);
+    const res = S.game.lastAward || { won: 0, sidePot: 0, returned: 0 };
     exitAwardMode();
     ui.selected = null;
+    const names = S.game.players.filter((p) => ids.includes(p.id)).map((p) => p.name);
+    let msg = `<b>${esc(names.join(' & '))}</b> ${names.length > 1 ? 'split' : 'wins'} ${esc(fmt(res.won))}`;
+    if (res.returned) msg += ` · ${esc(fmt(res.returned))} uncalled/side pot returned`;
+    if (res.sidePot > 0) {
+      // A short-stacked winner can't win it all: keep awarding the side pot.
+      ui.awardMode = true;
+      ui.awardPicks = new Set();
+      msg += ` · <b>side pot ${esc(fmt(res.sidePot))}</b> left — tap its winner`;
+    }
     commitGame(S.game, true);
     flashWinners(ids);
-    const names = S.game.players.filter((p) => ids.includes(p.id)).map((p) => p.name);
-    toast(`<b>${esc(names.join(' & '))}</b> ${names.length > 1 ? 'split' : 'wins'} ${esc(fmt(amt))}`);
+    toast(msg, res.sidePot > 0 ? 5000 : 2600);
+    if (res.sidePot > 0) return;
     const busted = S.game.players.filter((p) => !p.out && p.stack === 0 && p.bet === 0);
     if (busted.length) setTimeout(() => promptBust(busted), 700);
   }

@@ -264,3 +264,59 @@ test('formatting', () => {
   assert.equal(E.formatChips(250000, true), '250K');
   assert.equal(E.formatMoney(12.5, '$'), '$12.50');
 });
+
+test('side pots: a short all-in winner only takes what they could win', () => {
+  // A (100) all-in, B and C each put in 300. A has the best hand, then B.
+  let g = game(3, 1000);
+  g.players[0].stack = 100;
+  g = E.placeBet(g, 'p1', 100).game;
+  g = E.placeBet(g, 'p2', 300).game;
+  g = E.placeBet(g, 'p3', 300).game;
+  const before = E.chipsInPlay(g);
+  g = E.awardPot(g, ['p1']);
+  assert.equal(g.players[0].stack, 300, 'main pot = 3 × 100');
+  assert.equal(g.pot, 400, 'side pot between B and C remains');
+  g = E.awardPot(g, ['p2']);
+  assert.equal(g.players[1].stack, 700 + 400);
+  assert.equal(g.pot, 0);
+  assert.equal(E.chipsInPlay(g), before);
+});
+
+test('side pots: uncalled excess goes back when only one player remains in it', () => {
+  // A all-in for 100, B covers with 500 (nobody else): B gets 400 back.
+  let g = game(2, 1000);
+  g.players[0].stack = 100;
+  g = E.placeBet(g, 'p1', 100).game;
+  g = E.placeBet(g, 'p2', 500).game;
+  g = E.awardPot(g, ['p1']);
+  assert.equal(g.players[0].stack, 200);
+  assert.equal(g.players[1].stack, 900);
+  assert.equal(g.pot, 0);
+  assert.equal(g.lastAward.returned, 400);
+});
+
+test('side pots: dead money (antes, carried pot) goes to the main pot', () => {
+  let g = E.startHand(game(3, 1000), lv(10, 20, 10, 20), 'bb');
+  // SB = p2 (10), BB = p3 (20 + 20 ante). p1 calls 20, SB completes.
+  g = E.callBet(g, 'p1').game;
+  g = E.callBet(g, 'p2').game;
+  const total = E.potTotal(g);
+  assert.equal(total, 80);
+  g = E.awardPot(g, ['p1']);
+  assert.equal(g.players[0].stack, 1000 - 20 + 80);
+  assert.equal(g.pot, 0);
+});
+
+test('side pots: split main pot, bigger stack wins the side pot alone', () => {
+  let g = game(3, 1000);
+  g.players[0].stack = 100;
+  g = E.placeBet(g, 'p1', 100).game;
+  g = E.placeBet(g, 'p2', 300).game;
+  g = E.placeBet(g, 'p3', 300).game;
+  g = E.fold(g, 'p3');
+  // A and B tie: main pot (300) split; side pot (400) is B's — C folded.
+  g = E.awardPot(g, ['p1', 'p2']);
+  assert.equal(g.players[0].stack, 150);
+  assert.equal(g.players[1].stack, 700 + 150 + 400);
+  assert.equal(g.pot, 0);
+});

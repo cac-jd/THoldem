@@ -431,10 +431,16 @@
     return game.players.find((p) => p.seat === seat);
   }
 
-  function takeChips(p, amount) {
+  /**
+   * Move chips from a stack to the player's bet. `committed` tracks what the
+   * player has put in this hand (for side pots); antes are dead money and
+   * don't count towards it.
+   */
+  function takeChips(p, amount, dead) {
     const amt = Math.max(0, Math.min(p.stack, Math.round(amount)));
     p.stack -= amt;
     p.bet += amt;
+    if (!dead) p.committed = (p.committed || 0) + amt;
     return amt;
   }
 
@@ -456,9 +462,10 @@
   function startHand(game, level, anteMode) {
     const g = clone(game);
     g.players.forEach((p) => { p.folded = !!p.out; });
-    // Any uncollected bets from an abandoned hand stay in the pot.
+    // Any uncollected bets from an abandoned hand stay in the pot (as dead money).
     g.pot += g.players.reduce((s, p) => s + p.bet, 0);
-    g.players.forEach((p) => { p.bet = 0; });
+    g.players.forEach((p) => { p.bet = 0; p.committed = 0; });
+    g.lastAward = null;
     const act = activePlayers(g);
     if (act.length < 2) return g;
     if (g.handNumber > 0 || !act.some((p) => p.seat === g.dealerSeat)) g.dealerSeat = nextActiveSeat(g, g.dealerSeat);
@@ -468,9 +475,9 @@
     const posted = { sb: 0, bb: 0, ante: 0 };
     if (level.ante > 0) {
       if (anteMode === 'each') {
-        act.forEach((p) => { posted.ante += takeChips(playerAtSeat(g, p.seat), level.ante); });
+        act.forEach((p) => { posted.ante += takeChips(playerAtSeat(g, p.seat), level.ante, true); });
       } else {
-        posted.ante += takeChips(playerAtSeat(g, bbSeat), level.ante);
+        posted.ante += takeChips(playerAtSeat(g, bbSeat), level.ante, true);
       }
       // Antes are dead money: move them straight to the pot.
       g.pot += posted.ante;
@@ -522,19 +529,73 @@
     return game.pot + game.players.reduce((s, p) => s + p.bet, 0);
   }
 
-  /** Split the whole pot between winners; odd chips go to the first winner left of the button. */
-  function awardPot(game, winnerIds) {
-    const g = collectBets(game);
-    const winners = g.players.filter((p) => winnerIds.includes(p.id));
-    if (!winners.length || g.pot <= 0) return g;
-    const order = winners.slice().sort((a, b) => seatDistance(g, g.dealerSeat, a.seat) - seatDistance(g, g.dealerSeat, b.seat));
-    const share = Math.floor(g.pot / order.length);
-    let odd = g.pot - share * order.length;
+  /** Split `amount` between players; odd chips go to the first winner left of the button. */
+  function splitAmong(g, players, amount) {
+    const order = players.slice().sort((a, b) => seatDistance(g, g.dealerSeat, a.seat) - seatDistance(g, g.dealerSeat, b.seat));
+    const share = Math.floor(amount / order.length);
+    let odd = amount - share * order.length;
     order.forEach((p) => {
       p.stack += share + (odd > 0 ? 1 : 0);
       if (odd > 0) odd--;
     });
-    g.pot = 0;
+  }
+
+  /**
+   * Award the pot to the best hand (several ids = a split). Side pots are
+   * respected: a winner only collects, from each player, up to what they put
+   * in themselves. Whatever they can't win stays in the pot as a side pot for
+   * the next award; if only one live player is left in it (or nobody), it is
+   * returned automatically as an uncalled bet.
+   * Returns the new game; `game.lastAward` = {won, sidePot, returned}.
+   */
+  function awardPot(game, winnerIds) {
+    const g = collectBets(game);
+    const winners = g.players.filter((p) => winnerIds.includes(p.id));
+    const total = g.pot;
+    if (!winners.length || total <= 0) return g;
+    const c = (p) => Math.max(0, p.committed || 0);
+    const tracked = g.players.reduce((s, p) => s + c(p), 0);
+    const dead = Math.max(0, total - tracked);
+    const cap = Math.max(...winners.map(c));
+
+    // Pay out layer by layer (main pot, then side pots) up to the biggest winner's stake.
+    const cuts = [...new Set(g.players.map(c).filter((v) => v > 0 && v <= cap))].sort((a, b) => a - b);
+    if (!cuts.length || cuts[cuts.length - 1] !== cap) cuts.push(cap);
+    let prev = 0;
+    let won = 0;
+    cuts.forEach((cut, i) => {
+      let layer = g.players.reduce((s, p) => s + Math.min(c(p), cut) - Math.min(c(p), prev), 0);
+      if (i === 0) layer += dead;
+      const eligible = winners.filter((w) => c(w) >= cut);
+      if (layer > 0) {
+        splitAmong(g, eligible.length ? eligible : winners, layer);
+        won += layer;
+      }
+      prev = cut;
+    });
+
+    g.players.forEach((p) => { p.committed = Math.max(0, c(p) - cap); });
+    g.pot = total - won;
+
+    // What's left is a side pot. If nobody (or only one live player) can contest it, give it back.
+    let returned = 0;
+    if (g.pot > 0) {
+      const contenders = g.players.filter((p) => p.committed > 0 && !p.folded && !p.out && !winnerIds.includes(p.id));
+      if (contenders.length <= 1) {
+        const owners = g.players.filter((p) => p.committed > 0);
+        if (contenders.length === 1) {
+          contenders[0].stack += g.pot;
+        } else {
+          owners.forEach((p) => { p.stack += p.committed; });
+          const rest = g.pot - owners.reduce((s, p) => s + p.committed, 0);
+          if (rest > 0) splitAmong(g, winners, rest);
+        }
+        returned = g.pot;
+        g.pot = 0;
+        g.players.forEach((p) => { p.committed = 0; });
+      }
+    }
+    g.lastAward = { won, sidePot: g.pot, returned };
     return g;
   }
 
