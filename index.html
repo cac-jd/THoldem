@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>THoldem — Tournament Clock</title>
+  <meta name="description" content="Texas Hold'em home tournament clock: blinds, breaks, pot, chips and players." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%99%A0%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&display=swap" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body data-felt="green">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">♠</span>
+      <span class="brand-name">THoldem</span>
+      <span class="event-name" id="eventTitle"></span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="table" role="tab">Table</button>
+      <button class="tab" data-view="structure" role="tab">Blinds &amp; Breaks</button>
+      <button class="tab" data-view="players" role="tab">Players &amp; Payouts</button>
+      <button class="tab" data-view="chips" role="tab">Chips</button>
+      <button class="tab" data-view="settings" role="tab">Sound &amp; Look</button>
+      <button class="tab" data-view="help" role="tab">Help</button>
+    </nav>
+    <div class="top-actions">
+      <button class="icon-btn" id="muteBtn" title="Mute / unmute (M)">🔊</button>
+      <button class="icon-btn" id="fullscreenBtn" title="Fullscreen (F)">⛶</button>
+    </div>
+  </header>
+
+  <div id="warningBanner" class="warning-banner" hidden>
+    <span class="wb-icon">⏱</span>
+    <span class="wb-text" id="warningText"></span>
+    <button class="wb-close" id="warningClose" title="Dismiss">✕</button>
+  </div>
+
+  <main>
+    <!-- ============================== TABLE ============================== -->
+    <section class="view active" id="view-table">
+      <div class="table-layout">
+        <aside class="panel side-left">
+          <div class="stat-card level-card">
+            <div class="stat-label" id="levelLabel">Level 1</div>
+            <div class="blinds-big" id="blindsNow">25 / 50</div>
+            <div class="ante-line" id="anteNow">No ante</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Next</div>
+            <div class="blinds-next" id="blindsNext">50 / 100</div>
+            <div class="ante-line" id="anteNext"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Next break</div>
+            <div class="stat-value" id="nextBreak">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tournament time</div>
+            <div class="stat-value" id="elapsed">0:00</div>
+          </div>
+        </aside>
+
+        <div class="table-stage">
+          <div class="poker-table" id="pokerTable">
+            <div class="rail">
+              <div class="felt">
+                <div class="felt-line"></div>
+                <div class="felt-brand" id="feltBrand">THoldem</div>
+                <div class="center-clock" id="centerClock">
+                  <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+                    <circle class="ring-bg" cx="60" cy="60" r="54" />
+                    <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="54" />
+                  </svg>
+                  <div class="clock-inner">
+                    <div class="clock-level" id="clockLevel">LEVEL 1</div>
+                    <div class="clock-time" id="clockTime">15:00</div>
+                    <div class="clock-blinds" id="clockBlinds">25 / 50</div>
+                    <div class="clock-state" id="clockState">PAUSED — press Start</div>
+                  </div>
+                </div>
+                <div class="pot-area" id="potArea" title="Current pot">
+                  <div class="pot-chips" id="potChips"></div>
+                  <div class="pot-label">POT <span id="potValue">0</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="seats" id="seats"></div>
+          </div>
+        </div>
+
+        <aside class="panel side-right">
+          <div class="stat-card">
+            <div class="stat-label">Players</div>
+            <div class="stat-value" id="playersLeft">8 / 8</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Avg stack</div>
+            <div class="stat-value" id="avgStack">10,000</div>
+            <div class="ante-line" id="avgBb"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Chips in play</div>
+            <div class="stat-value" id="chipsInPlay">80,000</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Prize pool</div>
+            <div class="stat-value money" id="prizePool">$160</div>
+            <ol class="payout-list" id="payoutList"></ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="control-deck">
+        <div class="clock-controls">
+          <button class="btn" id="prevLevel" title="Previous level (←)">⏮</button>
+          <button class="btn" id="minusMin" title="Minus 1 minute (↓)">−1:00</button>
+          <button class="btn btn-primary btn-play" id="playPause" title="Start / pause (Space)">▶ Start</button>
+          <button class="btn" id="plusMin" title="Plus 1 minute (↑)">+1:00</button>
+          <button class="btn" id="nextLevel" title="Next level (→)">⏭</button>
+          <button class="btn btn-ghost" id="resetLevel" title="Restart this level">↺ Level</button>
+        </div>
+        <div class="hand-controls" id="handControls">
+          <div class="hand-info">
+            <span id="handNo">No hand yet</span>
+            <span class="sep">·</span>
+            <span id="selectedInfo">Tap a seat to select a player</span>
+          </div>
+          <div class="hand-buttons">
+            <button class="btn btn-gold" id="newHand" title="Move button &amp; post blinds (N)">🂠 New hand</button>
+            <button class="btn" id="callBtn" disabled>Call</button>
+            <button class="btn" id="foldBtn" disabled>Fold</button>
+            <button class="btn" id="allInBtn" disabled>All-in</button>
+            <button class="btn" id="collectBtn" title="Sweep bets into the pot">Collect</button>
+            <button class="btn btn-gold" id="awardBtn">🏆 Award pot</button>
+            <button class="btn btn-ghost" id="cancelAward" hidden>Cancel</button>
+            <button class="btn btn-ghost" id="undoBtn" title="Undo last chip action (Ctrl+Z)" disabled>↶ Undo</button>
+          </div>
+          <div class="chip-tray" id="chipTray"></div>
+          <div class="bet-entry">
+            <input type="number" id="betAmount" min="0" step="1" placeholder="Bet amount" />
+            <button class="btn" id="betClear" title="Clear amount">C</button>
+            <button class="btn btn-primary" id="betPlace">Bet</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ STRUCTURE ============================ -->
+    <section class="view" id="view-structure">
+      <div class="page">
+        <div class="page-head">
+          <h2>Blinds &amp; Breaks</h2>
+          <p class="muted">Edit any level inline — changes apply immediately, even mid-tournament. Add breaks anywhere.</p>
+        </div>
+
+        <div class="card">
+          <h3>Quick build</h3>
+          <div class="preset-row" id="presetRow"></div>
+          <div class="form-grid">
+            <label>Starting stack<input type="number" id="genStack" min="1" /></label>
+            <label>Smallest chip<input type="number" id="genChip" min="1" /></label>
+            <label>Starting depth (big blinds)<input type="number" id="genDepth" min="10" max="1000" value="100" /></label>
+            <label>Level length (min)<input type="number" id="genMinutes" min="1" value="15" /></label>
+            <label>Number of levels<input type="number" id="genCount" min="1" max="60" value="16" /></label>
+            <label>Blind speed
+              <select id="genSpeed">
+                <option value="slow">Slow (≈×1.1–1.2)</option>
+                <option value="standard" selected>Standard (≈×1.25)</option>
+                <option value="fast">Fast (≈×1.5)</option>
+              </select>
+            </label>
+            <label>Break every (levels, 0 = none)<input type="number" id="genBreakEvery" min="0" value="4" /></label>
+            <label>Break length (min)<input type="number" id="genBreakMinutes" min="1" value="10" /></label>
+            <label>Antes
+              <select id="genAntes">
+                <option value="none">No antes</option>
+                <option value="bb" selected>Big-blind ante</option>
+                <option value="classic">Classic (everyone, ≈⅛ BB)</option>
+              </select>
+            </label>
+            <label>Antes start at level<input type="number" id="genAnteFrom" min="1" value="5" /></label>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-primary" id="genBtn">Generate structure</button>
+            <span class="muted" id="genSummary"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Levels</h3>
+            <div class="row-actions">
+              <button class="btn" id="addLevel">+ Level</button>
+              <button class="btn" id="addBreak">+ Break</button>
+              <button class="btn btn-ghost" id="setAllMinutes">Set all level lengths…</button>
+            </div>
+          </div>
+          <div class="structure-problems" id="structureProblems"></div>
+          <div class="table-scroll">
+            <table class="structure-table">
+              <thead>
+                <tr><th>#</th><th>Type</th><th>Small blind</th><th>Big blind</th><th>Ante</th><th>Minutes</th><th>Starts at</th><th></th></tr>
+              </thead>
+              <tbody id="structureBody"></tbody>
+            </table>
+          </div>
+          <label class="check"><input type="checkbox" id="pauseAfterBreak" /> Pause the clock when a break ends (wait for the director to restart)</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= PLAYERS ============================= -->
+    <section class="view" id="view-players">
+      <div class="page">
+        <div class="page-head">
+          <h2>Players &amp; Payouts</h2>
+          <p class="muted">Table size, names, buy-ins, rebuys and add-ons. Tap a seat on the table for rebuys, add-ons, stack edits and knockouts.</p>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Table</h3>
+            <div class="form-grid">
+              <label>Number of players (2–12)<input type="number" id="playerCount" min="2" max="12" /></label>
+              <label>Event name<input type="text" id="eventName" maxlength="60" /></label>
+              <label>Starting stack (chips)<input type="number" id="startingStack" min="1" /></label>
+              <label>Currency symbol<input type="text" id="currency" maxlength="3" /></label>
+            </div>
+            <label class="check"><input type="checkbox" id="trackStacks" /> Track player stacks, bets &amp; pot at the table</label>
+            <h4>Player names <button class="btn btn-small btn-ghost" id="shuffleSeats">🔀 Shuffle seats</button></h4>
+            <div class="name-grid" id="nameGrid"></div>
+          </div>
+          <div class="card">
+            <h3>Money</h3>
+            <div class="form-grid">
+              <label>Buy-in<input type="number" id="buyIn" min="0" step="any" /></label>
+              <label>Rake / fee %<input type="number" id="rakePercent" min="0" max="100" step="any" /></label>
+              <label>Rebuy cost<input type="number" id="rebuyCost" min="0" step="any" /></label>
+              <label>Rebuy chips<input type="number" id="rebuyChips" min="0" /></label>
+              <label>Add-on cost<input type="number" id="addonCost" min="0" step="any" /></label>
+              <label>Add-on chips<input type="number" id="addonChips" min="0" /></label>
+            </div>
+            <h4>Payouts (% of prize pool)</h4>
+            <div class="payout-editor" id="payoutEditor"></div>
+            <div class="row-actions">
+              <button class="btn btn-small" id="addPayout">+ Place</button>
+              <button class="btn btn-small" id="removePayout">− Place</button>
+              <button class="btn btn-small btn-ghost" id="suggestPayout">Suggest</button>
+              <span class="muted" id="payoutSum"></span>
+            </div>
+            <div class="standings" id="standings"></div>
+          </div>
+        </div>
+        <div class="card danger-zone">
+          <h3>New tournament</h3>
+          <p class="muted">Reset the clock to level 1, restore every stack to the starting stack, clear the pot, rebuys and knockouts. Your structure and settings are kept.</p>
+          <button class="btn btn-danger" id="newTournament">Start a new tournament</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== CHIPS ============================== -->
+    <section class="view" id="view-chips">
+      <div class="page">
+        <div class="page-head">
+          <h2>Chip Denominations</h2>
+          <p class="muted">Match your own chip set — colors, values and how many of each every player starts with.</p>
+        </div>
+        <div class="card">
+          <div class="chip-editor" id="chipEditor"></div>
+          <div class="row-actions">
+            <button class="btn" id="addChip">+ Denomination</button>
+            <button class="btn btn-primary" id="autoDistribute">Auto-distribute starting stack</button>
+            <span id="chipSummary" class="muted"></span>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Chips needed for the whole table</h3>
+            <div id="chipNeeds"></div>
+          </div>
+          <div class="card">
+            <h3>Color-up planner</h3>
+            <div id="colorUp"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ SETTINGS ============================= -->
+    <section class="view" id="view-settings">
+      <div class="page">
+        <div class="page-head">
+          <h2>Sound &amp; Look</h2>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Alerts</h3>
+            <div class="form-grid">
+              <label>Warning before blinds go up (min)<input type="number" id="warningMinutes" min="0" max="60" step="0.5" /></label>
+              <label>Volume<input type="range" id="volume" min="0" max="1" step="0.05" /></label>
+            </div>
+            <label class="check"><input type="checkbox" id="soundEnabled" /> Sound on</label>
+            <label class="check"><input type="checkbox" id="oneMinuteWarning" /> Extra 1-minute warning</label>
+            <label class="check"><input type="checkbox" id="voiceEnabled" /> Announce blinds out loud (voice)</label>
+            <label class="check"><input type="checkbox" id="notifications" /> Desktop notifications when the app is in the background</label>
+            <label class="check"><input type="checkbox" id="keepAwake" /> Keep the screen awake while the clock runs</label>
+            <div class="form-grid">
+              <label>Voice<select id="voiceName"></select></label>
+            </div>
+            <h4>Sounds</h4>
+            <div class="sound-rows" id="soundRows"></div>
+          </div>
+          <div class="card">
+            <h3>Table look</h3>
+            <div class="swatches" id="feltSwatches"></div>
+            <div class="form-grid">
+              <label>Rail
+                <select id="railStyle">
+                  <option value="leather">Black leather</option>
+                  <option value="wood">Walnut wood</option>
+                  <option value="burgundy">Burgundy</option>
+                </select>
+              </label>
+              <label>Felt logo text<input type="text" id="feltText" maxlength="24" /></label>
+            </div>
+            <label class="check"><input type="checkbox" id="compactNumbers" /> Compact numbers (1.5K instead of 1,500)</label>
+            <h3>Save &amp; share</h3>
+            <p class="muted">Everything saves automatically in this browser. Export to move a setup to another device.</p>
+            <div class="row-actions">
+              <button class="btn" id="exportBtn">⬇ Export setup</button>
+              <label class="btn file-btn">⬆ Import setup<input type="file" id="importFile" accept="application/json,.json" hidden /></label>
+              <button class="btn btn-danger" id="factoryReset">Reset everything</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================== HELP ============================== -->
+    <section class="view" id="view-help">
+      <div class="page help" id="helpContent"></div>
+    </section>
+  </main>
+
+  <!-- Level-up / break takeover -->
+  <div class="overlay" id="overlay" hidden>
+    <div class="overlay-sweep"></div>
+    <div class="overlay-card">
+      <div class="overlay-kicker" id="overlayKicker">BLINDS UP</div>
+      <div class="overlay-title" id="overlayTitle">LEVEL 2</div>
+      <div class="overlay-blinds" id="overlayBlinds">50 / 100</div>
+      <div class="overlay-sub" id="overlaySub"></div>
+      <button class="btn btn-ghost overlay-dismiss" id="overlayDismiss">Tap to continue</button>
+    </div>
+  </div>
+
+  <!-- Generic modal -->
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <button class="modal-x" id="modalClose" title="Close">✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="js/engine.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/help.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
