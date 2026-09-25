@@ -32,7 +32,7 @@
 
   function freshState(config) {
     const cfg = config || E.createDefaultConfig();
-    return { config: cfg, clock: E.createClock(cfg.levels), game: E.createGame(cfg) };
+    return { config: cfg, clock: E.createClock(cfg.levels, E.warningThresholds(cfg)), game: E.createGame(cfg) };
   }
 
   function mergeConfig(saved) {
@@ -78,6 +78,9 @@
   const curLevel = () => levels()[S.clock.index];
   const warnings = () => E.warningThresholds(S.config);
   const fmt = (n) => E.formatChips(n, S.config.compactNumbers);
+  const chipValues = () => S.config.chips.map((c) => Number(c.value)).filter((v) => v > 0);
+  const smallestChip = () => Math.min(...chipValues(), Infinity) || 1;
+  const anteModeFor = (l) => cfg().anteMode || (l && l.ante >= l.bb ? 'bb' : 'each');
   const money = (n) => E.formatMoney(n, S.config.currency);
 
   function blindsText(l) {
@@ -137,8 +140,17 @@
 
   // ---------------------------------------------------------------- Clock
 
+  /** Keep one level queued after the current one so the clock never runs dry. */
+  function ensureNextLevel() {
+    if (cfg().autoExtend === false || S.clock.index < levels().length - 1) return false;
+    levels().push(E.extendLevel(levels(), chipValues()));
+    renderStructure();
+    return true;
+  }
+
   function tick() {
     const now = Date.now();
+    if (S.clock.running && ensureNextLevel()) save();
     const res = E.tickClock(S.clock, levels(), now, warnings());
     S.clock = res.clock;
     if (res.events.length) {
@@ -151,12 +163,15 @@
   function handleClockEvents(events, now) {
     const levelEvents = events.filter((e) => e.type === 'level');
     if (levelEvents.length) {
-      const last = levelEvents[levelEvents.length - 1];
-      const fromBreak = E.isBreak(levels()[last.from]);
+      let last = levelEvents[levelEvents.length - 1];
       ui.banner = null;
-      if (fromBreak && cfg().pauseAfterBreak && !E.isBreak(levels()[last.index])) {
-        S.clock = E.pauseClock(S.clock, now);
+      const breakEnd = levelEvents.find((e) => E.isBreak(levels()[e.from]) && !E.isBreak(levels()[e.index]));
+      if (breakEnd && cfg().pauseAfterBreak) {
+        // Hold at the start of the first level after the break (even when catching up after sleep).
+        S.clock = E.gotoLevel(E.pauseClock(S.clock, now), levels(), breakEnd.index, now, warnings());
+        last = breakEnd;
         releaseWakeLock();
+        toast('Break is over — press <b>Start</b> when everyone is back', 6000);
       }
       announceLevel(last.index);
       renderStructure();
@@ -302,6 +317,44 @@
     else document.exitFullscreen && document.exitFullscreen();
   }
 
+  function toggleBigClock() {
+    cfg().bigClock = !cfg().bigClock;
+    save();
+    applyBigClock();
+    if (cfg().bigClock) showView('table');
+  }
+
+  function applyBigClock() {
+    document.body.classList.toggle('mode-bigclock', !!cfg().bigClock);
+    setText($('bigClockBtn'), cfg().bigClock ? '🂠 Table view' : '⏱ Big clock');
+    renderClock();
+  }
+
+  function renderBigClock(now, rem) {
+    if (!cfg().bigClock) return;
+    const idx = S.clock.index;
+    const l = curLevel();
+    const next = levels()[idx + 1];
+    const onBreak = E.isBreak(l);
+    setText($('bcLevel'), onBreak ? (l.label || 'Break').toUpperCase() : 'LEVEL ' + E.levelNumber(levels(), idx));
+    setText($('bcTime'), E.formatClock(rem));
+    setText($('bcBlinds'), onBreak ? 'On break' : blindsText(l));
+    setText($('bcAnte'), onBreak ? (next ? 'Next: ' + blindsText(next) : '') : anteText(l));
+    setText($('bcNext'), next ? (E.isBreak(next) ? 'Break (' + next.minutes + ' min)' : blindsText(next) + (next.ante ? ' · ' + anteText(next) : '')) : '—');
+    const nb = E.msUntilNextBreak(levels(), idx, rem);
+    setText($('bcBreak'), onBreak ? 'Now' : nb < 0 ? '—' : E.formatClock(nb));
+    const act = E.activePlayers(S.game);
+    setText($('bcPlayers'), act.length + ' / ' + S.game.players.length);
+    setText($('bcAvg'), fmt(act.length ? E.chipsInPlay(S.game) / act.length : 0));
+    setText($('bcState'), S.clock.running ? '' : S.clock.startedAt ? 'PAUSED' : 'PRESS START');
+    const bc = $('bigClock');
+    const warnMax = Math.max(0, ...warnings());
+    bc.classList.toggle('warn', !onBreak && !!next && rem <= warnMax && rem > 60000);
+    bc.classList.toggle('danger', !onBreak && !!next && rem <= 60000);
+    bc.classList.toggle('on-break', onBreak);
+    bc.classList.toggle('paused', !S.clock.running);
+  }
+
   // ---------------------------------------------------------------- Overlay & banner
 
   function showOverlay(kind, kicker, title, blinds, sub, ms) {
@@ -392,6 +445,7 @@
 
     renderPlayButton();
     renderBanner(now);
+    renderBigClock(now, rem);
     document.title = `${E.formatClock(rem)} · ${onBreak ? 'Break' : blindsText(l)} — THoldem`;
 
     if (ui.lastIndex !== idx) {
@@ -492,10 +546,10 @@
       if (!p.out && p.seat === sbSeat) badges.push('<span class="badge sb">SB</span>');
       if (!p.out && p.seat === bbSeat) badges.push('<span class="badge bb">BB</span>');
       const stackLine = track ? `<div class="seat-stack">${esc(fmt(p.stack))}</div>` + (bb && !p.out ? `<div class="seat-stack bb">${Math.floor(p.stack / bb)} BB</div>` : '') : '';
-      html += `<div class="${cls.join(' ')}" data-id="${esc(p.id)}" style="left:${pos.x}%;top:${pos.y}%">
+      html += `<div class="${cls.join(' ')}" data-id="${esc(p.id)}" title="${esc(p.name)} — tap to select, tap again for the player menu" style="left:${pos.x}%;top:${pos.y}%">
         <div class="seat-card">
           <div class="seat-badges">${badges.join('')}</div>
-          <div class="seat-avatar">${esc(initials(p.name))}</div>
+          <div class="seat-avatar" title="Seat ${p.seat + 1}">${p.seat + 1}</div>
           <div class="seat-name" title="${esc(p.name)}">${esc(p.name)}</div>
           ${stackLine}
         </div>
@@ -543,12 +597,12 @@
       const side = S.game.lastAward && S.game.lastAward.sidePot > 0 && S.game.pot === S.game.lastAward.sidePot;
       info.innerHTML = names.length
         ? `Winner${names.length > 1 ? 's (split)' : ''}: <b>${esc(names.join(', '))}</b> — press Confirm`
-        : side ? `Side pot <b>${esc(fmt(S.game.pot))}</b>: tap its winner, then Confirm` : 'Tap the winning seat(s), then Confirm — tap several to split';
+        : side ? `Side pot <b>${esc(fmt(S.game.pot))}</b>: tap its winner, then Confirm` : 'Tap the <b>best hand</b> first (all-ins win the main pot), then Confirm — tap several to split';
     } else if (sel) {
       const toCall = Math.max(0, ...g.players.map((p) => p.bet)) - sel.bet;
-      info.innerHTML = `<b>${esc(sel.name)}</b> · stack ${esc(fmt(sel.stack))}` + (toCall > 0 ? ` · to call ${esc(fmt(Math.min(toCall, sel.stack)))}` : '');
+      info.innerHTML = `<b>${esc(sel.name)}</b> · stack ${esc(fmt(sel.stack))}` + (toCall > 0 ? ` · to call ${esc(fmt(Math.min(toCall, sel.stack)))}` : '') + (sel.folded ? ' · folded' : '') + ' <span class="muted">· tap again for rebuy / knockout · Esc to deselect</span>';
     } else {
-      info.textContent = 'Tap a seat to select a player — or tap chips to add straight to the pot';
+      info.textContent = 'Tap a seat to select a player — or build an amount and press Add to pot';
     }
     const can = !!sel && !sel.folded && !ui.awardMode;
     const toCall = sel ? Math.max(0, ...g.players.map((p) => p.bet)) - sel.bet : 0;
@@ -634,8 +688,7 @@
     const l = curLevel();
     if (E.activePlayers(S.game).length < 2) { toast('Need at least two players still in.'); return; }
     pushUndo();
-    const anteMode = l && l.ante > 0 && l.ante >= l.bb ? 'bb' : 'each';
-    const g = E.startHand(S.game, l, anteMode);
+    const g = E.startHand(S.game, l, anteModeFor(l));
     const bs = g.lastBlinds;
     if (bs) {
       const bbSeat = bs.bbSeat;
@@ -655,13 +708,20 @@
     return S.game.players.find((p) => p.id === ui.selected && !p.out);
   }
 
+  /** The selected player, if they can still act this hand. */
+  function actingPlayer() {
+    const p = selectedPlayer();
+    return p && !p.folded && !ui.awardMode ? p : null;
+  }
+
   function betAmount() {
     return Math.max(0, Math.round(Number($('betAmount').value) || 0));
   }
 
   function placeBet(amount) {
     const p = selectedPlayer();
-    if (!amount) return;
+    if (!amount || ui.awardMode) return;
+    if (p && p.folded) { toast(`${esc(p.name)} has folded — Esc to deselect, then Add to pot`); return; }
     pushUndo();
     if (!p) {
       commitGame(E.addToPot(S.game, amount), true);
@@ -676,7 +736,7 @@
   }
 
   function call() {
-    const p = selectedPlayer();
+    const p = actingPlayer();
     if (!p) return;
     pushUndo();
     const res = E.callBet(S.game, p.id);
@@ -686,8 +746,8 @@
   }
 
   function allIn() {
-    const p = selectedPlayer();
-    if (!p) return;
+    const p = actingPlayer();
+    if (!p || p.stack <= 0) return;
     pushUndo();
     const res = E.placeBet(S.game, p.id, p.stack);
     S.game = res.game;
@@ -697,7 +757,7 @@
   }
 
   function foldSelected() {
-    const p = selectedPlayer();
+    const p = actingPlayer();
     if (!p) return;
     pushUndo();
     S.game = E.fold(S.game, p.id);
@@ -706,7 +766,7 @@
     if (live.length === 1 && E.potTotal(S.game) > 0) {
       const w = live[0];
       const amt = E.potTotal(S.game);
-      S.game = E.awardPot(S.game, [w.id]);
+      S.game = E.awardPot(S.game, [w.id], smallestChip());
       ui.selected = null;
       commitGame(S.game, true);
       flashWinners([w.id]);
@@ -744,7 +804,7 @@
 
   function awardTo(ids) {
     pushUndo();
-    S.game = E.awardPot(S.game, ids);
+    S.game = E.awardPot(S.game, ids, smallestChip());
     const res = S.game.lastAward || { won: 0, sidePot: 0, returned: 0 };
     exitAwardMode();
     ui.selected = null;
@@ -803,6 +863,9 @@
     commitGame(S.game);
     const left = E.activePlayers(S.game);
     if (left.length === 1) {
+      S.clock = E.pauseClock(S.clock, Date.now());
+      releaseWakeLock();
+      save();
       showOverlay('level', 'WE HAVE A CHAMPION', left[0].name.toUpperCase(), '🏆', `${cfg().eventName || ''}`, 12000);
       playCue('levelUp');
       speak(`Congratulations ${left[0].name}, champion of ${cfg().eventName || 'the tournament'}!`, 3);
@@ -851,8 +914,9 @@
          <button class="btn" data-dealer>Give button</button>
          <button class="btn" data-rebuy>Rebuy (+${esc(fmt(c.rebuyChips))})</button>
          <button class="btn" data-addon ${p.out ? 'disabled' : ''}>Add-on (+${esc(fmt(c.addonChips))})</button>
-         ${p.out ? '<button class="btn" data-back>Bring back</button>' : '<button class="btn btn-danger" data-bust>Knock out</button>'}
-       </div>`,
+         ${p.out ? '<button class="btn" data-back title="Returns with 0 chips — set their stack, then Save">Bring back</button>' : '<button class="btn btn-danger" data-bust>Knock out</button>'}
+       </div>
+       ${p.out ? '<p class="muted">Bring back returns them with 0 chips — then set their stack and Save.</p>' : ''}`,
       (root) => {
         const nameIn = root.querySelector('[data-f=name]');
         const stackIn = root.querySelector('[data-f=stack]');
@@ -870,7 +934,7 @@
           renderPlayersView();
         };
         root.querySelector('[data-save]').onclick = () => { saveEdits(); closeModal(); };
-        root.querySelector('[data-dealer]').onclick = () => { pushUndo(); commitGame({ ...S.game, dealerSeat: p.seat, players: S.game.players.map((x) => ({ ...x })) }); closeModal(); };
+        root.querySelector('[data-dealer]').onclick = () => { pushUndo(); commitGame({ ...S.game, dealerSeat: p.seat, manualButton: true, lastBlinds: null, players: S.game.players.map((x) => ({ ...x })) }); closeModal(); };
         root.querySelector('[data-rebuy]').onclick = () => { closeModal(); doRebuy(id); };
         const ad = root.querySelector('[data-addon]');
         if (ad) ad.onclick = () => { closeModal(); doAddon(id); };
@@ -887,6 +951,7 @@
   function onSeatClick(e) {
     const seatEl = e.target.closest('.seat');
     if (!seatEl) return;
+    e.stopPropagation();
     const id = seatEl.dataset.id;
     const p = S.game.players.find((x) => x.id === id);
     if (!p) return;
@@ -940,6 +1005,9 @@
 
   function renderStructure() {
     const body = $('structureBody');
+    $('pauseAfterBreak').checked = !!cfg().pauseAfterBreak;
+    $('autoExtend').checked = cfg().autoExtend !== false;
+    $('anteMode').value = cfg().anteMode || 'auto';
     const ls = levels();
     let startMs = 0;
     let num = 0;
@@ -1043,13 +1111,7 @@
   }
 
   function addLevel() {
-    mutateLevels((ls) => {
-      const last = [...ls].reverse().find((l) => !E.isBreak(l));
-      const smallest = Math.min(...cfg().chips.map((c) => Number(c.value)).filter((v) => v > 0));
-      const bb = last ? E.nextNiceNumber(last.bb * 1.2, smallest * 2) : 50;
-      const ante = last && last.ante ? (last.ante === last.bb ? bb : Math.max(smallest, Math.ceil(bb / 8 / smallest) * smallest)) : 0;
-      ls.push({ type: 'level', sb: bb / 2, bb, ante, minutes: last ? last.minutes : 15 });
-    });
+    mutateLevels((ls) => { ls.push(E.extendLevel(ls, chipValues())); });
   }
 
   function addBreak() {
@@ -1068,6 +1130,7 @@
       breakMinutes: Math.max(1, Number($('genBreakMinutes').value) || 10),
       antes: $('genAntes').value,
       anteFromLevel: Math.max(1, Number($('genAnteFrom').value) || 1),
+      chipValues: chipValues(),
     };
   }
 
@@ -1090,6 +1153,7 @@
     const opts = readGenForm();
     const apply = () => {
       cfg().levels = E.generateStructure(opts);
+      if (opts.antes !== 'none') cfg().anteMode = opts.antes === 'classic' ? 'each' : 'bb';
       S.clock = E.gotoLevel({ ...S.clock, running: false, endsAt: null }, levels(), 0, Date.now(), warnings());
       S.clock.startedAt = null;
       ui.banner = null;
@@ -1156,6 +1220,7 @@
     }
     if (t.dataset.place != null) {
       c.payoutPercents[Number(t.dataset.place)] = Math.max(0, Number(t.value) || 0);
+      c.payoutsCustom = true;
       save();
       const sum = c.payoutPercents.reduce((s, x) => s + Number(x || 0), 0);
       $('payoutSum').textContent = `Total ${Math.round(sum * 100) / 100}%` + (Math.abs(sum - 100) > 0.01 ? ' — should add up to 100%' : ' ✓');
@@ -1185,6 +1250,7 @@
       if (n === c.playerCount) return;
       for (let i = c.playerNames.length; i < n; i++) c.playerNames[i] = E.PLAYER_NAMES[i] || 'Player ' + (i + 1);
       c.playerCount = n;
+      if (!c.payoutsCustom) c.payoutPercents = E.defaultPayoutPercents(n);
       S.game = E.resizePlayers(S.game, c);
       ui.selected = null;
       save();
@@ -1228,7 +1294,7 @@
 
   function newTournament() {
     confirmModal('Start a new tournament?', 'Clock back to level 1, all stacks reset, pot cleared, knockouts and rebuys wiped. Your structure and settings stay.', 'Start fresh', () => {
-      S.clock = E.createClock(levels());
+      S.clock = E.createClock(levels(), warnings());
       S.game = E.createGame(cfg());
       ui.selected = null;
       ui.undo = [];
@@ -1342,6 +1408,8 @@
     $('notifications').checked = c.sound.notifications;
     $('keepAwake').checked = c.keepAwake;
     $('pauseAfterBreak').checked = c.pauseAfterBreak;
+    $('autoExtend').checked = c.autoExtend !== false;
+    $('anteMode').value = c.anteMode || 'auto';
     $('compactNumbers').checked = c.compactNumbers;
     $('railStyle').value = c.theme.rail;
     $('feltText').value = c.theme.feltText != null ? c.theme.feltText : 'THoldem';
@@ -1472,6 +1540,8 @@
 
   function renderAll() {
     renderTheme();
+    document.body.classList.toggle('mode-bigclock', !!cfg().bigClock);
+    setText($('bigClockBtn'), cfg().bigClock ? '🂠 Table view' : '⏱ Big clock');
     renderTable();
     renderChipTray();
     renderClock();
@@ -1499,6 +1569,15 @@
 
     // Hand controls
     $('seats').addEventListener('click', onSeatClick);
+    // Tapping the felt (not a seat, clock or pot) clears the selection.
+    $('pokerTable').addEventListener('click', (e) => {
+      if (e.target.closest('.seat, .center-clock, .pot-area') || !ui.selected || ui.awardMode) return;
+      ui.selected = null;
+      renderSeatsOnly();
+      renderHandControls();
+    });
+    $('bigClockBtn').onclick = toggleBigClock;
+    $('bigClock').onclick = startPause;
     $('newHand').onclick = newHand;
     $('callBtn').onclick = call;
     $('foldBtn').onclick = foldSelected;
@@ -1554,9 +1633,9 @@
     pv.addEventListener('change', onPlayersChange);
     $('shuffleSeats').onclick = shuffleSeats;
     $('newTournament').onclick = newTournament;
-    $('addPayout').onclick = () => { cfg().payoutPercents.push(0); save(); renderPlayersView(); };
-    $('removePayout').onclick = () => { if (cfg().payoutPercents.length > 1) { cfg().payoutPercents.pop(); save(); renderPlayersView(); renderStats(); } };
-    $('suggestPayout').onclick = () => { cfg().payoutPercents = E.defaultPayoutPercents(S.game.players.length); save(); renderPlayersView(); renderStats(); };
+    $('addPayout').onclick = () => { cfg().payoutPercents.push(0); cfg().payoutsCustom = true; save(); renderPlayersView(); };
+    $('removePayout').onclick = () => { if (cfg().payoutPercents.length > 1) { cfg().payoutPercents.pop(); cfg().payoutsCustom = true; save(); renderPlayersView(); renderStats(); } };
+    $('suggestPayout').onclick = () => { cfg().payoutPercents = E.defaultPayoutPercents(S.game.players.length); cfg().payoutsCustom = false; save(); renderPlayersView(); renderStats(); };
 
     // Chips
     $('chipEditor').addEventListener('change', onChipsChange);
@@ -1570,6 +1649,8 @@
     $('volume').addEventListener('input', (e) => { A.setVolume(e.target.value); });
     $('feltText').addEventListener('input', (e) => { cfg().theme.feltText = e.target.value; renderTheme(); save(); });
     $('pauseAfterBreak').addEventListener('change', (e) => { cfg().pauseAfterBreak = e.target.checked; save(); });
+    $('autoExtend').addEventListener('change', (e) => { cfg().autoExtend = e.target.checked; save(); });
+    $('anteMode').addEventListener('change', (e) => { cfg().anteMode = e.target.value === 'auto' ? '' : e.target.value; save(); });
     sv.addEventListener('click', (e) => {
       const sw = e.target.closest('.swatch');
       if (sw) { cfg().theme.felt = sw.dataset.felt; save(); renderTheme(); renderSettings(); return; }
@@ -1603,13 +1684,20 @@
       if (!$('modal').hidden) closeModal();
       else if (!$('overlay').hidden) hideOverlay();
       else if (ui.awardMode) { exitAwardMode(); renderSeatsOnly(); renderHandControls(); }
+      else if (ui.selected) { ui.selected = null; renderSeatsOnly(); renderHandControls(); }
       return;
     }
     if (typing || !$('modal').hidden) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     switch (e.key) {
-      case ' ': e.preventDefault(); if (!$('overlay').hidden) hideOverlay(); startPause(); break;
+      case ' ':
+        e.preventDefault();
+        // Space on the takeover card only dismisses it — it must not pause the clock.
+        if (!$('overlay').hidden) hideOverlay();
+        else startPause();
+        break;
+      case 'b': case 'B': toggleBigClock(); break;
       case 'ArrowRight': gotoLevel(S.clock.index + 1); break;
       case 'ArrowLeft': gotoLevel(S.clock.index - 1); break;
       case 'ArrowUp': e.preventDefault(); adjustTime(E.MINUTE); break;
@@ -1637,6 +1725,8 @@
     const now = Date.now();
     const res = E.tickClock(S.clock, levels(), now, warnings());
     S.clock = res.clock;
+    const breakEnd = res.events.find((e) => e.type === 'level' && E.isBreak(levels()[e.from]) && !E.isBreak(levels()[e.index]));
+    if (breakEnd && cfg().pauseAfterBreak) S.clock = E.gotoLevel(E.pauseClock(S.clock, now), levels(), breakEnd.index, now, warnings());
     const rem = E.getRemaining(S.clock, now);
     if ((S.clock.firedWarnings || []).length && rem <= Math.max(0, ...warnings())) ui.banner = { index: S.clock.index, dismissed: false };
     renderAll();

@@ -425,6 +425,7 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   position: relative;
 }
 .seat-avatar {
+  color: #cfd6df;
   width: 3.4cqw;
   height: 3.4cqw;
   min-width: 24px;
@@ -519,6 +520,41 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .chip-tray .chip { --size: 44px; }
 .bet-entry { display: flex; gap: 6px; }
 .bet-entry input { width: 130px; }
+
+/* Big clock mode — readable from across the room */
+.big-clock { display: none; }
+body.mode-bigclock .big-clock {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2vh 16px;
+  cursor: pointer;
+  min-height: 0;
+}
+body.mode-bigclock .table-layout, body.mode-bigclock .hand-controls { display: none; }
+.bc-level { font-family: var(--display); font-size: clamp(1.4rem, 5vh, 4rem); letter-spacing: 0.3em; color: var(--gold); font-weight: 600; }
+.bc-time {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(5rem, 30vh, 26rem);
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.5), 0 0 60px rgba(255, 255, 255, 0.12);
+}
+.bc-state { font-size: clamp(0.9rem, 2.2vh, 1.4rem); letter-spacing: 0.3em; color: var(--muted); min-height: 1.2em; font-weight: 700; }
+.bc-blinds { font-family: var(--display); font-weight: 700; font-size: clamp(2.5rem, 12vh, 10rem); line-height: 1; }
+.bc-ante { font-size: clamp(1.1rem, 4vh, 3rem); color: #c8d0da; min-height: 1.2em; font-family: var(--display); }
+.bc-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 28px; margin-top: 3vh; }
+.bc-row div { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1vh 22px; min-width: 160px; }
+.bc-row span { display: block; font-size: clamp(0.7rem, 1.6vh, 1rem); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.bc-row b { font-family: var(--display); font-size: clamp(1.3rem, 4.5vh, 3rem); font-weight: 600; }
+.big-clock.warn .bc-time { color: var(--amber); }
+.big-clock.danger .bc-time { color: #ff6b70; animation: throb 1s ease-in-out infinite; }
+.big-clock.on-break .bc-level, .big-clock.on-break .bc-time { color: var(--blue); }
+.big-clock.paused .bc-time { opacity: 0.75; }
 
 /* ------------------------------------------------------------------- Forms */
 

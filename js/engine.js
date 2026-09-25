@@ -93,8 +93,8 @@
   // ---------------------------------------------------------------------------
 
   // Big blinds are chosen from this "nice number" ladder (times powers of ten).
-  const LADDER = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
-  const SPEED_FACTOR = { slow: 1.1, standard: 1.2, fast: 1.45 };
+  const LADDER = [1, 1.2, 1.5, 1.6, 2, 2.5, 3, 4, 5, 6, 8];
+  const SPEED_FACTOR = { slow: 1.1, standard: 1.2, fast: 1.3 };
 
   function roundTo(value, unit) {
     return Math.round(value / unit) * unit;
@@ -122,7 +122,9 @@
    * Build a level list from high-level parameters.
    * opts: startingStack, smallestChip, levelMinutes, speed, levelCount,
    *       breakEvery, breakMinutes, antes ('none' | 'bb' | 'classic'), anteFromLevel,
-   *       startingBigBlinds (depth, default 100)
+   *       startingBigBlinds (depth, default 100),
+   *       chipValues (denominations; once the small blind is 4× a bigger chip,
+   *       blinds snap to multiples of it so the small chips can be colored up)
    */
   function generateStructure(opts) {
     const o = {
@@ -137,23 +139,42 @@
     const levelCount = clampInt(o.levelCount, 1, 60);
 
     let bb = nextNiceNumber(Math.max(bbUnit, o.startingStack / Math.max(1, o.startingBigBlinds)), bbUnit);
+    const chipVals = [...new Set([unit, ...(o.chipValues || []).map(Number)])].filter((v) => v >= unit).sort((a, b) => a - b);
+    const snapUnit = (sb) => chipVals.reduce((u, v) => (sb >= 4 * v ? v : u), unit);
     const levels = [];
     let played = 0;
     for (let i = 1; i <= levelCount; i++) {
       const sb = bb / 2;
+      const u = snapUnit(sb);
       let ante = 0;
       if (i >= o.anteFromLevel) {
         if (o.antes === 'bb') ante = bb;
-        else if (o.antes === 'classic') ante = Math.max(unit, ceilTo(bb / 8, unit));
+        else if (o.antes === 'classic') ante = Math.max(u, ceilTo(bb / 8, u));
       }
       levels.push({ type: 'level', sb, bb, ante, minutes: o.levelMinutes });
       played++;
       if (o.breakEvery > 0 && o.breakMinutes > 0 && played % o.breakEvery === 0 && i < levelCount) {
         levels.push({ type: 'break', minutes: o.breakMinutes, label: 'Break' });
       }
-      bb = nextNiceNumber(Math.max(bb + bbUnit, bb * factor), bbUnit);
+      // A little tolerance so we land on 2,000 rather than overshooting to 3,000.
+      const nextMin = Math.max(bb + bbUnit, bb * factor * 0.96);
+      bb = nextNiceNumber(nextMin, 2 * snapUnit(nextMin / 2));
     }
     return levels;
+  }
+
+  /** A sensible next level after `levels` (used to keep the clock going past the last level). */
+  function extendLevel(levels, chipValues) {
+    const plays = levels.filter((l) => !isBreak(l));
+    const last = plays[plays.length - 1];
+    if (!last) return { type: 'level', sb: 25, bb: 50, ante: 0, minutes: 15 };
+    const vals = (chipValues || []).map(Number).filter((v) => v > 0).sort((a, b) => a - b);
+    const smallest = vals[0] || Math.max(1, last.sb);
+    const u = vals.reduce((acc, v) => (last.sb * 1.25 >= 4 * v ? v : acc), smallest);
+    const bb = nextNiceNumber(Math.max(last.bb + 2 * u, last.bb * 1.25), 2 * u);
+    let ante = 0;
+    if (last.ante > 0) ante = last.ante >= last.bb ? bb : Math.max(u, ceilTo(bb / 8, u));
+    return { type: 'level', sb: bb / 2, bb, ante, minutes: last.minutes };
   }
 
   function isBreak(level) {
@@ -205,13 +226,14 @@
   // Clock
   // ---------------------------------------------------------------------------
 
-  function createClock(levels) {
+  function createClock(levels, warningsMs) {
+    const len = levelMs(levels[0]);
     return {
       index: 0,
       running: false,
-      remainingMs: levelMs(levels[0]),
+      remainingMs: len,
       endsAt: null,
-      firedWarnings: [],
+      firedWarnings: (warningsMs || []).filter((w) => w >= len),
       finished: false,
       elapsedMs: 0,
       startedAt: null,
@@ -379,8 +401,8 @@
   function payouts(net, percents) {
     const total = percents.reduce((s, p) => s + p, 0) || 1;
     const amounts = percents.map((p) => Math.floor((net * p) / total));
-    const diff = Math.round(net - amounts.reduce((s, a) => s + a, 0));
-    if (amounts.length) amounts[0] += diff;
+    const diff = Math.round((net - amounts.reduce((s, a) => s + a, 0)) * 100) / 100;
+    if (amounts.length) amounts[0] = Math.round((amounts[0] + diff) * 100) / 100;
     return amounts;
   }
 
@@ -444,19 +466,49 @@
     return amt;
   }
 
-  /** Blind positions for the current dealer: {sbSeat, bbSeat}. Heads-up: dealer posts SB. */
+  function isActiveSeat(game, seat) {
+    return game.players.some((p) => p.seat === seat && !p.out);
+  }
+
+  /** Blind positions: {sbSeat, bbSeat}. sbSeat is null for a dead small blind. Heads-up: dealer posts SB. */
   function blindSeats(game) {
+    if (game.handNumber > 0 && game.lastBlinds && game.lastBlinds.bbSeat != null) {
+      return { sbSeat: game.lastBlinds.sbSeat, bbSeat: game.lastBlinds.bbSeat };
+    }
+    return blindsFromButton(game);
+  }
+
+  function blindsFromButton(game) {
     const act = activePlayers(game);
     if (act.length < 2) return { sbSeat: null, bbSeat: null };
-    const dealer = act.some((p) => p.seat === game.dealerSeat) ? game.dealerSeat : nextActiveSeat(game, game.dealerSeat);
+    const dealer = isActiveSeat(game, game.dealerSeat) ? game.dealerSeat : nextActiveSeat(game, game.dealerSeat);
     const sbSeat = act.length === 2 ? dealer : nextActiveSeat(game, dealer);
     const bbSeat = nextActiveSeat(game, sbSeat);
-    return { sbSeat, bbSeat };
+    return { sbSeat, sbPos: sbSeat, bbSeat, dealerSeat: dealer };
+  }
+
+  /**
+   * Dead-button rule: the big blind always moves forward exactly one active
+   * player, so nobody skips (or repeats) the big blind when players bust.
+   * The small blind goes to last hand's big-blind seat (dead if that player
+   * busted) and the button to last hand's small-blind position.
+   */
+  function advanceBlinds(game, prev) {
+    const act = activePlayers(game);
+    const bbSeat = nextActiveSeat(game, prev.bbSeat);
+    if (act.length === 2) {
+      const other = act.find((p) => p.seat !== bbSeat).seat;
+      return { dealerSeat: other, sbSeat: other, sbPos: other, bbSeat };
+    }
+    const sbPos = prev.bbSeat;
+    const sbSeat = isActiveSeat(game, sbPos) ? sbPos : null;
+    const dealerSeat = prev.sbPos != null ? prev.sbPos : prev.sbSeat != null ? prev.sbSeat : game.dealerSeat;
+    return { dealerSeat, sbSeat, sbPos, bbSeat };
   }
 
   /**
    * Start a new hand: move the button (except for the very first hand), clear
-   * folds, and post blinds and antes from the current level.
+   * folds, post the blinds and then the antes for the current level.
    * anteMode: 'bb' (big blind posts one ante for the table) or 'each'.
    */
   function startHand(game, level, anteMode) {
@@ -468,24 +520,34 @@
     g.lastAward = null;
     const act = activePlayers(g);
     if (act.length < 2) return g;
-    if (g.handNumber > 0 || !act.some((p) => p.seat === g.dealerSeat)) g.dealerSeat = nextActiveSeat(g, g.dealerSeat);
-    g.handNumber += 1;
-    if (!level || isBreak(level)) return g;
-    const { sbSeat, bbSeat } = blindSeats(g);
-    const posted = { sb: 0, bb: 0, ante: 0 };
-    if (level.ante > 0) {
-      if (anteMode === 'each') {
-        act.forEach((p) => { posted.ante += takeChips(playerAtSeat(g, p.seat), level.ante, true); });
-      } else {
-        posted.ante += takeChips(playerAtSeat(g, bbSeat), level.ante, true);
-      }
-      // Antes are dead money: move them straight to the pot.
-      g.pot += posted.ante;
-      g.players.forEach((p) => { p.bet = 0; });
+    const prev = g.handNumber > 0 && !g.manualButton ? g.lastBlinds : null;
+    let seats;
+    if (prev && prev.bbSeat != null) {
+      seats = advanceBlinds(g, prev);
+    } else {
+      if (g.handNumber > 0 && !g.manualButton) g.dealerSeat = nextActiveSeat(g, g.dealerSeat);
+      seats = blindsFromButton(g);
     }
-    posted.sb = takeChips(playerAtSeat(g, sbSeat), level.sb);
-    posted.bb = takeChips(playerAtSeat(g, bbSeat), level.bb);
-    g.lastBlinds = { sbSeat, bbSeat, ...posted };
+    g.manualButton = false;
+    g.dealerSeat = seats.dealerSeat;
+    g.handNumber += 1;
+    const posted = { sb: 0, bb: 0, ante: 0 };
+    g.lastBlinds = { sbSeat: seats.sbSeat, sbPos: seats.sbPos, bbSeat: seats.bbSeat, ...posted };
+    if (!level || isBreak(level)) return g;
+    // Blinds first, then antes from whatever is left (a short big blind keeps their blind live).
+    if (seats.sbSeat != null) posted.sb = takeChips(playerAtSeat(g, seats.sbSeat), level.sb);
+    posted.bb = takeChips(playerAtSeat(g, seats.bbSeat), level.bb);
+    if (level.ante > 0) {
+      const payers = anteMode === 'each' ? act.map((p) => playerAtSeat(g, p.seat)) : [playerAtSeat(g, seats.bbSeat)];
+      payers.forEach((p) => {
+        // Antes are dead money: straight into the pot, not part of anyone's bet.
+        const amt = Math.max(0, Math.min(p.stack, level.ante));
+        p.stack -= amt;
+        g.pot += amt;
+        posted.ante += amt;
+      });
+    }
+    Object.assign(g.lastBlinds, posted);
     return g;
   }
 
@@ -529,15 +591,21 @@
     return game.pot + game.players.reduce((s, p) => s + p.bet, 0);
   }
 
-  /** Split `amount` between players; odd chips go to the first winner left of the button. */
-  function splitAmong(g, players, amount) {
+  /**
+   * Split `amount` between players in whole `unit`s (the smallest chip);
+   * odd chips go to the first winner left of the button.
+   */
+  function splitAmong(g, players, amount, unit) {
+    const u = Math.max(1, unit || 1);
     const order = players.slice().sort((a, b) => seatDistance(g, g.dealerSeat, a.seat) - seatDistance(g, g.dealerSeat, b.seat));
-    const share = Math.floor(amount / order.length);
-    let odd = amount - share * order.length;
+    const share = Math.floor(amount / order.length / u) * u;
+    let rest = amount - share * order.length;
     order.forEach((p) => {
-      p.stack += share + (odd > 0 ? 1 : 0);
-      if (odd > 0) odd--;
+      const extra = Math.min(rest, u);
+      p.stack += share + extra;
+      rest -= extra;
     });
+    if (rest > 0) order[0].stack += rest;
   }
 
   /**
@@ -548,7 +616,7 @@
    * returned automatically as an uncalled bet.
    * Returns the new game; `game.lastAward` = {won, sidePot, returned}.
    */
-  function awardPot(game, winnerIds) {
+  function awardPot(game, winnerIds, unit) {
     const g = collectBets(game);
     const winners = g.players.filter((p) => winnerIds.includes(p.id));
     const total = g.pot;
@@ -568,7 +636,7 @@
       if (i === 0) layer += dead;
       const eligible = winners.filter((w) => c(w) >= cut);
       if (layer > 0) {
-        splitAmong(g, eligible.length ? eligible : winners, layer);
+        splitAmong(g, eligible.length ? eligible : winners, layer, unit);
         won += layer;
       }
       prev = cut;
@@ -588,7 +656,7 @@
         } else {
           owners.forEach((p) => { p.stack += p.committed; });
           const rest = g.pot - owners.reduce((s, p) => s + p.committed, 0);
-          if (rest > 0) splitAmong(g, winners, rest);
+          if (rest > 0) splitAmong(g, winners, rest, unit);
         }
         returned = g.pot;
         g.pot = 0;
@@ -727,6 +795,7 @@
     defaultPayoutPercents,
     nextNiceNumber,
     generateStructure,
+    extendLevel,
     isBreak,
     levelNumber,
     findNext,

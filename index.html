@@ -41,6 +41,19 @@
   <main>
     <!-- ============================== TABLE ============================== -->
     <section class="view active" id="view-table">
+      <div class="big-clock" id="bigClock" title="Tap to start / pause (Space)">
+        <div class="bc-level" id="bcLevel">LEVEL 1</div>
+        <div class="bc-time" id="bcTime">15:00</div>
+        <div class="bc-state" id="bcState"></div>
+        <div class="bc-blinds" id="bcBlinds">50 / 100</div>
+        <div class="bc-ante" id="bcAnte"></div>
+        <div class="bc-row">
+          <div><span>Next level</span><b id="bcNext">—</b></div>
+          <div><span>Next break</span><b id="bcBreak">—</b></div>
+          <div><span>Players</span><b id="bcPlayers">—</b></div>
+          <div><span>Avg stack</span><b id="bcAvg">—</b></div>
+        </div>
+      </div>
       <div class="table-layout">
         <aside class="panel side-left">
           <div class="stat-card level-card">
@@ -69,7 +82,7 @@
               <div class="felt">
                 <div class="felt-line"></div>
                 <div class="felt-brand" id="feltBrand">THoldem</div>
-                <div class="center-clock" id="centerClock">
+                <div class="center-clock" id="centerClock" title="Tap to start / pause (Space)">
                   <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
                     <circle class="ring-bg" cx="60" cy="60" r="54" />
                     <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="54" />
@@ -81,7 +94,7 @@
                     <div class="clock-state" id="clockState">PAUSED — press Start</div>
                   </div>
                 </div>
-                <div class="pot-area" id="potArea" title="Current pot">
+                <div class="pot-area" id="potArea" title="Tap to award the pot">
                   <div class="pot-chips" id="potChips"></div>
                   <div class="pot-label">POT <span id="potValue">0</span></div>
                 </div>
@@ -120,7 +133,8 @@
           <button class="btn btn-primary btn-play" id="playPause" title="Start / pause (Space)">▶ Start</button>
           <button class="btn" id="plusMin" title="Plus 1 minute (↑)">+1:00</button>
           <button class="btn" id="nextLevel" title="Next level (→)">⏭</button>
-          <button class="btn btn-ghost" id="resetLevel" title="Restart this level">↺ Level</button>
+          <button class="btn btn-ghost" id="resetLevel" title="Restart this level from full time">↺ Level</button>
+          <button class="btn btn-ghost" id="bigClockBtn" title="Switch between the table and a huge clock for a TV (B)">⏱ Big clock</button>
         </div>
         <div class="hand-controls" id="handControls">
           <div class="hand-info">
@@ -140,8 +154,8 @@
           </div>
           <div class="chip-tray" id="chipTray"></div>
           <div class="bet-entry">
-            <input type="number" id="betAmount" min="0" step="1" placeholder="Bet amount" />
-            <button class="btn" id="betClear" title="Clear amount">C</button>
+            <input type="number" id="betAmount" min="0" step="1" placeholder="Amount" title="Chips to add on top of what's already in front of the player" />
+            <button class="btn" id="betClear" title="Clear amount">✕</button>
             <button class="btn btn-primary" id="betPlace">Bet</button>
           </div>
         </div>
@@ -208,6 +222,16 @@
             </table>
           </div>
           <label class="check"><input type="checkbox" id="pauseAfterBreak" /> Pause the clock when a break ends (wait for the director to restart)</label>
+          <label class="check"><input type="checkbox" id="autoExtend" /> Keep adding levels after the last one so the clock never stops</label>
+          <div class="form-grid" style="max-width:420px">
+            <label>Antes are paid by
+              <select id="anteMode">
+                <option value="auto">Automatic (BB ante if ante = big blind)</option>
+                <option value="bb">The big blind, once for the table</option>
+                <option value="each">Every player</option>
+              </select>
+            </label>
+          </div>
         </div>
       </div>
     </section>
@@ -328,7 +352,7 @@
             </div>
             <label class="check"><input type="checkbox" id="compactNumbers" /> Compact numbers (1.5K instead of 1,500)</label>
             <h3>Save &amp; share</h3>
-            <p class="muted">Everything saves automatically in this browser. Export to move a setup to another device.</p>
+            <p class="muted">Everything saves automatically in this browser. Export saves your setup (structure, chips, players, sounds, look) to move it to another device — not the live tournament or uploaded sound clips.</p>
             <div class="row-actions">
               <button class="btn" id="exportBtn">⬇ Export setup</button>
               <label class="btn file-btn">⬆ Import setup<input type="file" id="importFile" accept="application/json,.json" hidden /></label>
@@ -353,7 +377,7 @@
       <div class="overlay-title" id="overlayTitle">LEVEL 2</div>
       <div class="overlay-blinds" id="overlayBlinds">50 / 100</div>
       <div class="overlay-sub" id="overlaySub"></div>
-      <button class="btn btn-ghost overlay-dismiss" id="overlayDismiss">Tap to continue</button>
+      <button class="btn btn-ghost overlay-dismiss" id="overlayDismiss">Tap or Esc to continue</button>
     </div>
   </div>
 

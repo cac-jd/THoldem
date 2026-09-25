@@ -320,3 +320,75 @@ test('side pots: split main pot, bigger stack wins the side pot alone', () => {
   assert.equal(g.players[1].stack, 700 + 150 + 400);
   assert.equal(g.pot, 0);
 });
+
+test('dead button: the next player gets the big blind after the BB busts', () => {
+  let g = game(5);
+  g = E.startHand(g, lv(10, 20, 10), 'bb'); // D0 SB1 BB2
+  assert.deepEqual([g.dealerSeat, g.lastBlinds.sbSeat, g.lastBlinds.bbSeat], [0, 1, 2]);
+  g.players[2].stack = 0;
+  g = E.eliminate(g, 'p3');
+  g = E.startHand(g, lv(10, 20, 10), 'bb');
+  // Seat 3 is next in line for the big blind; the small blind (seat 2) is dead.
+  assert.equal(g.lastBlinds.bbSeat, 3);
+  assert.equal(g.lastBlinds.sbSeat, null);
+  assert.equal(g.dealerSeat, 1);
+  g = E.startHand(g, lv(10, 20, 10), 'bb');
+  assert.deepEqual([g.dealerSeat, g.lastBlinds.sbSeat, g.lastBlinds.bbSeat], [2, 3, 4]);
+});
+
+test('going heads-up nobody posts the big blind twice in a row', () => {
+  let g = game(3);
+  g = E.startHand(g, lv(10, 20, 10), 'bb'); // D0 SB1 BB2
+  g.players[0].stack = 0;
+  g = E.eliminate(g, 'p1');
+  g = E.startHand(g, lv(10, 20, 10), 'bb');
+  assert.equal(g.lastBlinds.bbSeat, 1);
+  assert.equal(g.lastBlinds.sbSeat, 2);
+  assert.equal(g.dealerSeat, 2, 'heads-up: button posts the small blind');
+});
+
+test('a short big blind posts the blind before the ante', () => {
+  let g = game(3);
+  g.players[2].stack = 300;
+  g = E.startHand(g, lv(200, 400, 10, 400), 'bb');
+  assert.equal(g.players[2].bet, 300);
+  assert.equal(g.pot, 0);
+});
+
+test('split pots are paid in whole chips', () => {
+  let g = game(3, 1000);
+  g = E.addToPot(g, 1075);
+  g = E.awardPot(g, ['p1', 'p2'], 25);
+  assert.equal(g.players[0].stack % 25, 0);
+  assert.equal(g.players[1].stack % 25, 0);
+  assert.equal(g.players[0].stack + g.players[1].stack, 3075);
+});
+
+test('no warning at the start of a short first level', () => {
+  const ls = [lv(25, 50, 3), lv(50, 100, 3)];
+  const w = [5 * MIN];
+  const c = E.startClock(E.createClock(ls, w), 0);
+  const r = E.tickClock(c, ls, 1000, w);
+  assert.equal(r.events.length, 0);
+});
+
+test('generated blinds let the small chips be colored up', () => {
+  const vals = [25, 100, 500, 1000, 5000];
+  const ls = E.generateStructure({ startingStack: 10000, smallestChip: 25, chipValues: vals, ...E.STRUCTURE_PRESETS.home });
+  const idx = ls.findIndex((l) => !E.isBreak(l) && l.sb >= 400);
+  assert.ok(idx > 0);
+  assert.deepEqual(E.colorUpCandidates(vals, ls, idx), [25]);
+});
+
+test('extendLevel continues the structure', () => {
+  const next = E.extendLevel([lv(1000, 2000, 15, 2000)], [25, 100, 500, 1000]);
+  assert.ok(next.bb > 2000);
+  assert.equal(next.sb * 2, next.bb);
+  assert.equal(next.ante, next.bb);
+  assert.equal(next.minutes, 15);
+});
+
+test('payouts keep cents exact', () => {
+  const pays = E.payouts(97.5, [50, 30, 20]);
+  assert.equal(pays.reduce((s, x) => s + x, 0), 97.5);
+});
