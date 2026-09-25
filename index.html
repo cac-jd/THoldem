@@ -127,6 +127,10 @@
       </div>
 
       <div class="control-deck">
+        <div class="mode-switch" id="modeSwitch" role="group" aria-label="Mode">
+          <button class="mode-btn" data-mode="run" title="Just the clock: blinds, time left, next break. Nothing to click each hand. (T)">⏱ Run mode</button>
+          <button class="mode-btn" data-mode="full" title="Also track every hand: post blinds, bets, pot and stacks. (T)">🂠 Full mode</button>
+        </div>
         <div class="clock-controls">
           <button class="btn" id="prevLevel" title="Previous level (←)">⏮</button>
           <button class="btn" id="minusMin" title="Minus 1 minute (↓)">−1:00</button>
@@ -252,7 +256,7 @@
               <label>Starting stack (chips)<input type="number" id="startingStack" min="1" /></label>
               <label>Currency symbol<input type="text" id="currency" maxlength="3" /></label>
             </div>
-            <label class="check"><input type="checkbox" id="trackStacks" /> Track player stacks, bets &amp; pot at the table</label>
+            <label class="check"><input type="checkbox" id="trackStacks" /> Full mode: track player stacks, bets &amp; pot every hand (off = Run mode, just the clock)</label>
             <h4>Player names <button class="btn btn-small btn-ghost" id="shuffleSeats">🔀 Shuffle seats</button></h4>
             <div class="name-grid" id="nameGrid"></div>
           </div>

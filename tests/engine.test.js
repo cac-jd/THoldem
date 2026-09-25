@@ -392,3 +392,13 @@ test('payouts keep cents exact', () => {
   const pays = E.payouts(97.5, [50, 30, 20]);
   assert.equal(pays.reduce((s, x) => s + x, 0), 97.5);
 });
+
+test('chipsIssued counts buy-ins, rebuys and add-ons (Run mode totals)', () => {
+  const cfg = { startingStack: 10000, rebuyChips: 10000, addonChips: 5000 };
+  const players = [{ rebuys: 1, addons: 1 }, { rebuys: 0, addons: 1 }, {}];
+  assert.equal(E.chipsIssued(cfg, players), 3 * 10000 + 10000 + 2 * 5000);
+});
+
+test('new setups start in Run mode (no per-hand tracking)', () => {
+  assert.equal(E.createDefaultConfig().trackStacks, false);
+});

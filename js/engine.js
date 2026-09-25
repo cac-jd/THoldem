@@ -63,7 +63,7 @@
       warningMinutes: 5,
       oneMinuteWarning: true,
       pauseAfterBreak: false,
-      trackStacks: true,
+      trackStacks: false, // Run mode by default; Full mode tracks every hand
       compactNumbers: false,
       theme: { felt: 'green', rail: 'leather' },
       sound: {
@@ -723,6 +723,11 @@
     return g;
   }
 
+  /** Chips handed out so far (buy-ins, rebuys, add-ons) — used when hands aren't tracked. */
+  function chipsIssued(config, players) {
+    return players.reduce((s, p) => s + (config.startingStack || 0) + (p.rebuys || 0) * (config.rebuyChips || 0) + (p.addons || 0) * (config.addonChips || 0), 0);
+  }
+
   function chipsInPlay(game) {
     return game.players.reduce((s, p) => s + p.stack + p.bet, 0) + game.pot;
   }
@@ -835,6 +840,7 @@
     rebuy,
     addon,
     chipsInPlay,
+    chipsIssued,
     resizePlayers,
     formatClock,
     formatChips,

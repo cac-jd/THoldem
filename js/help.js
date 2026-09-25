@@ -10,7 +10,7 @@ window.THoldemHelp = `
     <li><b>Blinds &amp; Breaks</b> (<kbd>2</kbd>): tap a preset. <b>Home Game</b> (15-minute levels, a break every 4 levels) is a good first choice. The blinds are built to fit your starting stack, so set that first.</li>
     <li><b>Chips</b> (<kbd>4</kbd>): enter the colours and values of your chip set and press <b>Auto-distribute starting stack</b>. It shows how many of each chip to give every player.</li>
     <li>Go to the <b>Table</b> (<kbd>1</kbd>) and press <b>▶ Start</b>, tap the big clock or press <kbd>Space</kbd>. Shuffle up and deal!</li>
-    <li>Optional: press <b>New hand</b> (<kbd>N</kbd>) at the start of every deal. It moves the dealer button and posts the blinds, and then you can track bets on screen. If you only want a clock, turn off <i>Track player stacks, bets &amp; pot</i> on the Players tab.</li>
+    <li>Pick a mode with the switch under the table: <b>⏱ Run mode</b> (the default) just runs the clock — nothing to click each hand. <b>🂠 Full mode</b> also tracks every hand: press <b>New hand</b> (<kbd>N</kbd>) each deal to move the button and post blinds, then track bets and the pot.</li>
   </ol>
   <p class="muted">Browsers only play sound after you click or press a key on the page. Check the volume under <b>Sound &amp; Look</b>, where the ▶ button next to each sound plays a preview.</p>
 </div>
@@ -31,8 +31,15 @@ window.THoldemHelp = `
   <li>The side panels show the current and next blinds, the time until the next break, the tournament time, players left, the average stack (also in big blinds), the chips in play and the prize pool with its payouts.</li>
 </ul>
 
-<h3>Tracking the pot</h3>
-<p class="muted">This is optional, but it keeps every stack accurate so you never have to count chips.</p>
+<h3>Run mode vs Full mode</h3>
+<table>
+  <tr><td><b>⏱ Run mode</b></td><td>The tournament clock only: current and next blinds, time left in the level, time to the next break, players left, average stack and the prize pool. You don't touch the app between hands. Tap a player only when they rebuy, take the add-on or get knocked out — the average stack is worked out from the buy-ins, rebuys and add-ons.</td></tr>
+  <tr><td><b>🂠 Full mode</b></td><td>Everything in Run mode, plus the dealer button, blinds posted automatically, bets, the pot and every player's stack.</td></tr>
+</table>
+<p class="muted">Switch any time with the buttons under the table or the <kbd>T</kbd> key — nothing is lost. The same setting is on the Players &amp; Payouts tab.</p>
+
+<h3>Tracking the pot (Full mode)</h3>
+<p class="muted">Optional: it keeps every stack accurate so you never have to count chips.
 <ol>
   <li><b>New hand</b> (<kbd>N</kbd>) moves the dealer button one seat to the left (the first hand keeps it where it is). It then posts the small and big blind for the current level and selects the first player to act. Heads-up, the dealer posts the small blind. On a break no blinds are posted.
     <br><span class="muted">Antes: if the ante is the same as the big blind, it is a <i>big-blind ante</i> and the big blind pays one ante for the whole table. A smaller ante is paid by every player. Antes go straight into the pot.</span></li>
@@ -113,6 +120,7 @@ window.THoldemHelp = `
   <tr><td><kbd>M</kbd></td><td>Mute / unmute</td></tr>
   <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>Switch tabs: Table, Blinds &amp; Breaks, Players &amp; Payouts, Chips, Sound &amp; Look, Help</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>Close a pop-up or the blinds-up card, cancel awarding the pot, or deselect a seat</td></tr>
+  <tr><td><kbd>T</kbd></td><td>Switch between Run mode (clock only) and Full mode (track hands)</td></tr>
   <tr><td><kbd>B</kbd></td><td>Big clock mode — a huge clock and blinds for a TV across the room (press again for the table)</td></tr>
 </table>
 <p class="muted">Shortcuts are ignored while you are typing in a box or while a pop-up is open. Click on an empty part of the page first.</p>
@@ -122,7 +130,7 @@ window.THoldemHelp = `
   <li>Connect the laptop to the TV (HDMI, or cast/mirror the browser tab), open the <b>Table</b> and press <kbd>F</kbd> for fullscreen. The tabs are hidden so the table fills the screen.</li>
   <li>To make everything bigger, use browser zoom (<kbd>Ctrl</kbd> <kbd>+</kbd>, or <kbd>⌘</kbd> <kbd>+</kbd> on Mac). The table resizes to fit the window.</li>
   <li>For a clock you can read from the couch, press <b>⏱ Big clock</b> (or <kbd>B</kbd>): a huge countdown, the blinds and ante, what's next and when the break is. Press it again to go back to the table.</li>
-  <li>If you don't want to track bets at all, turn off <i>Track player stacks, bets &amp; pot</i> (Players &amp; Payouts). The pot and hand buttons disappear.</li>
+  <li>Use <b>⏱ Run mode</b> if you don't want to track bets — the pot and hand buttons disappear.</li>
   <li>Plug in the charger. <i>Keep the screen awake</i> is on by default, but a laptop on battery may still sleep, and the clock catches up when it wakes.</li>
   <li>Open THoldem in <b>one</b> tab only. Every open tab runs the clock and plays the sounds.</li>
 </ul>

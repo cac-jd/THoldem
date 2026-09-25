@@ -81,6 +81,8 @@ async function openApp(opts = {}) {
   });
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__tholdem && window.__tholdem.state);
+  // Run mode is the default; most suites exercise hand tracking, so switch to Full unless asked not to.
+  if (opts.mode !== 'run') await page.evaluate(() => window.__tholdem.setMode('full'));
   if (opts.seed) {
     await page.evaluate(opts.seed);
   }
@@ -1368,11 +1370,72 @@ async function context_close(page) {
   try { await page.context().close(); } catch (e) { /* already closed */ }
 }
 
+async function testRunMode() {
+  section = 'run mode';
+  const page = await openApp({ mode: 'run' });
+
+  await check('a fresh setup opens in Run mode: clock only, no hand controls, pot or dealer button', async () => {
+    assert(await page.evaluate(() => document.body.classList.contains('mode-run')), 'body.mode-run');
+    assert(await page.locator('#modeSwitch [data-mode="run"].active').count() === 1, 'Run button active');
+    assert(!(await visible(page, '#handControls')), 'hand controls hidden');
+    assert(!(await visible(page, '#potArea')), 'pot hidden');
+    eq(await page.locator('.dealer-btn').count(), 0, 'dealer button');
+    eq(await page.locator('.badge.sb, .badge.bb').count(), 0, 'blind badges');
+    assert(await visible(page, '#clockTime'), 'clock visible');
+    assert((await text(page, '#blindsNow')).length > 0, 'current blinds shown');
+    assert((await text(page, '#nextBreak')).length > 0, 'next break shown');
+  });
+
+  await check('Run mode: tapping a seat opens the player menu (no selection step)', async () => {
+    await page.click('.seat[data-id="p1"]');
+    assert(await visible(page, '#modal'), 'player menu opens');
+    await page.keyboard.press('Escape');
+  });
+
+  await check('Run mode: rebuys and knockouts update players left and average stack without hand tracking', async () => {
+    const st = await S(page);
+    const start = st.config.startingStack;
+    const n = st.game.players.length;
+    await page.click('.seat[data-id="p1"]');
+    await page.click('#modal [data-rebuy]');
+    await dismissToast(page);
+    await page.click('.seat[data-id="p2"]');
+    await page.click('#modal [data-bust]');
+    await page.click('#modal [data-ok]');
+    await dismissToast(page);
+    const total = n * start + st.config.rebuyChips;
+    eq(await text(page, '#playersLeft'), `${n - 1} / ${n}`, 'players left');
+    eq(await text(page, '#chipsInPlay'), fmt(total), 'chips in play');
+    eq(await text(page, '#avgStack'), fmt(total / (n - 1)), 'avg stack');
+  });
+
+  await check('switching to Full mode (button and T key) brings back the hand tools, and back again', async () => {
+    await page.click('#modeSwitch [data-mode="full"]');
+    await dismissToast(page);
+    assert(await visible(page, '#handControls'), 'hand controls shown');
+    assert(await visible(page, '#potArea'), 'pot shown');
+    eq((await S(page)).config.trackStacks, true, 'config.trackStacks');
+    await page.keyboard.press('t');
+    await dismissToast(page);
+    assert(!(await visible(page, '#handControls')), 'hidden again after T');
+    eq((await S(page)).config.trackStacks, false, 'back to Run');
+  });
+
+  await check('the mode survives a reload', async () => {
+    await page.click('#modeSwitch [data-mode="full"]');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.__tholdem && window.__tholdem.state);
+    assert(await page.locator('#modeSwitch [data-mode="full"].active').count() === 1, 'Full still active');
+    noErrors(page);
+  });
+  await context_close(page);
+}
+
 // ------------------------------------------------------------------ main
 
 (async () => {
   browser = await chromium.launch({ headless: !process.env.HEADFUL });
-  const suites = [testLoadAndClock, testStructure, testPlayers, testHand, testBust, testChips, testSettings, testPersistence, testMobile, testEdgeCases];
+  const suites = [testLoadAndClock, testRunMode, testStructure, testPlayers, testHand, testBust, testChips, testSettings, testPersistence, testMobile, testEdgeCases];
   const only = process.env.ONLY ? new RegExp(process.env.ONLY, 'i') : null; // e.g. ONLY=edge|mobile
   for (const suite of suites) {
     if (only && !only.test(suite.name)) continue;

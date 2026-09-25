@@ -95,6 +95,8 @@
   const fmt = (n) => E.formatChips(n, S.config.compactNumbers);
   const chipValues = () => S.config.chips.map((c) => Number(c.value)).filter((v) => v > 0);
   const smallestChip = () => Math.min(...chipValues(), Infinity) || 1;
+  // Full mode counts real stacks; Run mode counts what was bought in.
+  const totalChips = () => (cfg().trackStacks ? E.chipsInPlay(S.game) : E.chipsIssued(cfg(), S.game.players));
   const anteModeFor = (l) => cfg().anteMode || (l && l.ante >= l.bb ? 'bb' : 'each');
   const money = (n) => E.formatMoney(n, S.config.currency);
 
@@ -375,7 +377,7 @@
     setText($('bcBreak'), onBreak ? 'Now' : nb < 0 ? '—' : E.formatClock(nb));
     const act = E.activePlayers(S.game);
     setText($('bcPlayers'), act.length + ' / ' + S.game.players.length);
-    setText($('bcAvg'), fmt(act.length ? E.chipsInPlay(S.game) / act.length : 0));
+    setText($('bcAvg'), fmt(act.length ? totalChips() / act.length : 0));
     setText($('bcState'), S.clock.running ? '' : S.clock.startedAt ? 'PAUSED' : 'PRESS START');
     const bc = $('bigClock');
     const warnMax = Math.max(0, ...warnings());
@@ -489,7 +491,7 @@
     const g = S.game;
     const act = E.activePlayers(g);
     setText($('playersLeft'), act.length + ' / ' + g.players.length);
-    const total = E.chipsInPlay(g);
+    const total = totalChips();
     const avg = act.length ? total / act.length : 0;
     setText($('avgStack'), fmt(avg));
     const l = curLevel();
@@ -573,10 +575,10 @@
       if (ui.selected === p.id && !ui.awardMode) cls.push('selected');
       if (ui.awardMode && ui.awardPicks.has(p.id)) cls.push('award-pick');
       const badges = [];
-      if (!p.out && p.seat === sbSeat) badges.push('<span class="badge sb">SB</span>');
-      if (!p.out && p.seat === bbSeat) badges.push('<span class="badge bb">BB</span>');
+      if (track && !p.out && p.seat === sbSeat) badges.push('<span class="badge sb">SB</span>');
+      if (track && !p.out && p.seat === bbSeat) badges.push('<span class="badge bb">BB</span>');
       const stackLine = track ? `<div class="seat-stack">${esc(fmt(p.stack))}</div>` + (bb && !p.out ? `<div class="seat-stack bb">${esc(fmt(Math.floor(p.stack / bb)))} BB</div>` : '') : '';
-      html += `<div class="${cls.join(' ')}" data-id="${esc(p.id)}" title="${esc(p.name)} — tap to select, tap again for the player menu" style="left:${pos.x}%;top:${pos.y}%">
+      html += `<div class="${cls.join(' ')}" data-id="${esc(p.id)}" title="${esc(p.name)} — ${track ? 'tap to select, tap again for the player menu' : 'tap for rebuy, add-on or knockout'}" style="left:${pos.x}%;top:${pos.y}%">
         <div class="seat-card">
           <div class="seat-badges">${badges.join('')}</div>
           <div class="seat-avatar" title="Seat ${p.seat + 1}">${p.seat + 1}</div>
@@ -592,7 +594,7 @@
       }
     });
     const dealer = g.players.find((p) => p.seat === g.dealerSeat);
-    if (dealer && n > 1) {
+    if (dealer && n > 1 && track) {
       const dp = geo[dealer.seat];
       const base = toward(dp, 0.26);
       // Nudge the button sideways so it doesn't sit on top of the bet.
@@ -1324,11 +1326,34 @@
       fillGenForm();
       toast('Starting stack is ' + fmt(v) + ' — regenerate the blinds if you want them to match.');
     } else if (t.id === 'trackStacks') {
-      c.trackStacks = t.checked;
-      exitAwardMode();
-      save();
-      renderTable();
+      setMode(t.checked ? 'full' : 'run');
     }
+  }
+
+  /** 'run' = clock only (nothing to click per hand); 'full' = track stacks, bets and the pot. */
+  function setMode(mode) {
+    const full = mode === 'full';
+    if (cfg().trackStacks === full) return;
+    cfg().trackStacks = full;
+    exitAwardMode();
+    ui.selected = null;
+    save(true);
+    renderTable();
+    renderMode();
+    $('trackStacks').checked = full;
+    toast(full
+      ? '<b>Full mode</b>: New hand posts blinds; tap seats to bet, award the pot'
+      : '<b>Run mode</b>: just the clock — tap a player only for rebuys or knockouts');
+  }
+
+  function renderMode() {
+    const full = !!cfg().trackStacks;
+    document.body.classList.toggle('mode-run', !full);
+    document.querySelectorAll('#modeSwitch [data-mode]').forEach((b) => {
+      const on = (b.dataset.mode === 'full') === full;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   function shuffleSeats() {
@@ -1596,6 +1621,7 @@
 
   function renderAll() {
     renderTheme();
+    renderMode();
     document.body.classList.toggle('mode-bigclock', !!cfg().bigClock);
     setText($('bigClockBtn'), cfg().bigClock ? '🂠 Table view' : '⏱ Big clock');
     renderTable();
@@ -1633,6 +1659,10 @@
       renderHandControls();
     });
     $('bigClockBtn').onclick = toggleBigClock;
+    $('modeSwitch').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mode]');
+      if (b) setMode(b.dataset.mode);
+    });
     $('bigClock').onclick = startPause;
     $('newHand').onclick = newHand;
     $('callBtn').onclick = call;
@@ -1728,6 +1758,8 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) { tick(); if (S.clock.running) requestWakeLock(); }
     });
+    // Don't lose a pending (debounced) save when the page is closed or reloaded.
+    window.addEventListener('pagehide', () => { if (ui.saveTimer) save(true); });
     window.addEventListener('storage', (e) => { if (e.key === STORAGE_KEY && e.newValue) { S = load(); renderAll(); } });
     window.matchMedia('(max-width: 800px)').addEventListener('change', renderSeatsOnly);
     if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = renderVoices;
@@ -1754,6 +1786,7 @@
         else startPause();
         break;
       case 'b': case 'B': toggleBigClock(); break;
+      case 't': case 'T': setMode(cfg().trackStacks ? 'run' : 'full'); break;
       case 'ArrowRight': gotoLevel(S.clock.index + 1); break;
       case 'ArrowLeft': gotoLevel(S.clock.index - 1); break;
       case 'ArrowUp': e.preventDefault(); adjustTime(E.MINUTE); break;
@@ -1792,7 +1825,7 @@
     if (S.clock.running) requestWakeLock();
     setInterval(tick, 200);
     // Test hook for automated QA.
-    window.__tholdem = { get state() { return S; }, tick, ui };
+    window.__tholdem = { get state() { return S; }, tick, ui, setMode };
   }
 
   document.addEventListener('DOMContentLoaded', init);

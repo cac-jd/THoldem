@@ -11,7 +11,8 @@ THoldem runs a live Texas Hold'em tournament at home: the blind clock, the level
 - **Level-up takeover** with an original, synthesized 90s-sports-TV style *Prime Time* brass fanfare, and a voice that reads out the new blinds and ante.
 - **Breaks** anywhere in the structure, with a colour-up reminder. The clock can pause itself when a break ends.
 - **Structure builder**: Home Game / Turbo / Deep Stack / Hyper presets, or a generator (stack depth, speed, level length, breaks, big-blind or classic antes). Every level can be edited inline, even mid-game.
-- **Pot tracking at the table**: *New hand* moves the dealer button and posts blinds and antes. Call / check / bet / fold / all-in from a chip tray. Award or split the pot, with side pots and uncalled bets handled automatically, and undo.
+- **Two modes**: *Run mode* (default) is just the clock — blinds, time left, next break, players left — with nothing to click between hands. *Full mode* adds hand tracking. Switch with the toggle under the table or `T`.
+- **Pot tracking at the table (Full mode)**: *New hand* moves the dealer button and posts blinds and antes. Call / check / bet / fold / all-in from a chip tray. Award or split the pot, with side pots and uncalled bets handled automatically, and undo.
 - **Players**: 2–12 seats, names, shuffle seats, stack edits, rebuys, add-ons, knockouts with finishing places, and a champion screen.
 - **Money**: buy-in, rake, rebuys, add-ons, prize pool and payouts by place.
 - **Chips**: your own denominations and colours, auto-distribution of the starting stack, a count of chips needed for the whole table, and a colour-up planner.
@@ -37,7 +38,7 @@ Saved data is kept separately for each way of opening the app, so a game started
 1. **Players & Payouts:** set the number of players, names, buy-in and starting stack.
 2. **Blinds & Breaks:** tap a preset (*Home Game* is a good first choice).
 3. **Chips:** enter your chip colours and values, then press **Auto-distribute starting stack**.
-4. **Table:** press **▶ Start** (or tap the clock, or press Space). For each deal, press **New hand** (`N`) if you want to track bets and the pot.
+4. **Table:** press **▶ Start** (or tap the clock, or press Space). That's it in Run mode. In Full mode, press **New hand** (`N`) each deal to track bets and the pot.
 
 The **Help** tab in the app is the full guide.
 
@@ -48,7 +49,9 @@ The **Help** tab in the app is the full guide.
 | `Space` | Start / pause the clock |
 | `→` / `←` | Next / previous level |
 | `↑` / `↓` | Add / remove one minute |
-| `N` | New hand (move the button, post blinds & antes) |
+| `T` | Switch Run mode (clock only) / Full mode (track hands) |
+| `B` | Big clock mode for a TV |
+| `N` | New hand (move the button, post blinds & antes) — Full mode |
 | `C` / `X` | Call-or-check / fold for the selected player |
 | `Ctrl`/`⌘` + `Z` | Undo the last table action |
 | `F` / `M` | Fullscreen / mute |
