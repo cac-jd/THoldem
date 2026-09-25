@@ -5,7 +5,7 @@
  *   PORT=8091 node server.js &          # serve the app
  *   node tests/e2e/smoke.e2e.js          # BASE_URL defaults to http://localhost:8091
  *
- * Env: BASE_URL, PW_PATH (path to the playwright module), SHOTS (screenshot dir),
+ * Env: ONLY=<regex on suite function name, e.g. Edge|Mobile>, BASE_URL, PW_PATH (path to the playwright module), SHOTS (screenshot dir),
  *      HEADFUL=1 to watch it run.
  * Prints PASS/FAIL per check; exits 1 if anything failed.
  */
@@ -49,6 +49,10 @@ async function check(name, fn) {
     console.log(`PASS  ${label}`);
   } catch (e) {
     results.push({ ok: false, label, err: e });
+    try {
+      const pg = pages[pages.length - 1];
+      if (pg && !pg.isClosed()) await pg.screenshot({ path: path.join(SHOTS, 'FAIL-' + label.replace(/[^\w]+/g, '_').slice(0, 80) + '.png') });
+    } catch (_) { /* ignore */ }
     console.log(`FAIL  ${label}\n      -> ${String(e && e.message || e).split('\n')[0]}`);
   }
 }
@@ -86,7 +90,8 @@ async function openApp(opts = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const S = (page) => page.evaluate(() => JSON.parse(JSON.stringify(window.__tholdem.state)));
-const text = (page, sel) => page.locator(sel).first().innerText();
+// textContent (not innerText) so CSS text-transform doesn't change what we compare.
+const text = (page, sel) => page.locator(sel).first().evaluate((el) => el.textContent.replace(/\s+/g, ' ').trim());
 const visible = (page, sel) => page.locator(sel).first().isVisible();
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
@@ -131,11 +136,27 @@ async function chipTotal(page) {
   });
 }
 
+/** Tap a seat once (select it, or toggle it in award mode). */
 async function clickSeat(page, seat) {
   await dismissToast(page);
   const id = await page.evaluate((seat) => window.__tholdem.state.game.players.find((p) => p.seat === seat).id, seat);
   await page.click(`.seat[data-id="${id}"] .seat-card`);
   return id;
+}
+
+/** Make `seat` the selected player (a second tap on a selected seat opens its menu, so only tap if needed). */
+async function selectSeat(page, seat) {
+  if ((await selectedSeat(page)) === seat) return;
+  await clickSeat(page, seat);
+  eq(await selectedSeat(page), seat, 'seat selected');
+}
+
+/** Open the player dialog for `seat` (select, then tap again). */
+async function openSeatMenu(page, seat) {
+  const out = await page.evaluate((seat) => window.__tholdem.state.game.players.find((p) => p.seat === seat).out, seat);
+  if (!out) await selectSeat(page, seat);
+  await clickSeat(page, seat);
+  await page.waitForSelector('#modal:not([hidden])', { timeout: 3000 });
 }
 
 async function selectedSeat(page) {
@@ -329,10 +350,31 @@ async function testLoadAndClock() {
     await dismissOverlay(page);
   });
 
-  await check('clock finishing the last level shows the end state', async () => {
+  await check('auto-extend: running past the last level appends a bigger level and keeps going', async () => {
     const n = (await S(page)).config.levels.length;
-    await page.evaluate((n) => { /* jump to last level via structure row button */ }, n);
     await tab(page, 'structure');
+    eq(await page.isChecked('#autoExtend'), true, 'auto-extend on by default');
+    await page.click(`#structureBody tr[data-i="${n - 1}"] [data-act="go"]`);
+    await tab(page, 'table');
+    await blurAll(page);
+    if (!(await S(page)).clock.running) await page.click('#playPause');
+    await sleep(300);
+    let st = await S(page);
+    eq(st.config.levels.length, n + 1, 'one level queued after the last');
+    const a = st.config.levels[n - 1];
+    const b = st.config.levels[n];
+    assert(b.bb > a.bb && b.sb > a.sb, 'queued level is bigger');
+    await ff(page, 100);
+    await sleep(200);
+    st = await S(page);
+    eq([st.clock.index, st.clock.running, st.clock.finished], [n, true, false], 'moved on to the new level');
+    await dismissOverlay(page);
+  });
+
+  await check('clock finishing the last level shows the end state (auto-extend off)', async () => {
+    await tab(page, 'structure');
+    await page.uncheck('#autoExtend');
+    const n = (await S(page)).config.levels.length;
     await page.click(`#structureBody tr[data-i="${n - 1}"] [data-act="go"]`);
     await tab(page, 'table');
     await blurAll(page);
@@ -340,6 +382,7 @@ async function testLoadAndClock() {
     await ff(page, 100);
     await sleep(200);
     const st = await S(page);
+    eq(st.config.levels.length, n, 'no level added');
     eq(st.clock.finished, true, 'finished');
     eq(st.clock.running, false, 'stopped');
     assert((await text(page, '#playPause')).includes('Finished'), 'button says finished');
@@ -598,21 +641,33 @@ async function testHand() {
     eq((await S(page)).game, before.game, 'Ctrl+Z restores');
   });
 
-  await check('Fold marks players folded; everyone-folds auto-awards the pot', async () => {
-    // Remaining to act: everyone except UTG and caller. Fold them all, including blinds.
-    for (let i = 0; i < 10; i++) {
-      const st = await S(page);
-      const live = st.game.players.filter((p) => !p.out && !p.folded);
-      if (live.length <= 1 || st.game.pot + st.game.players.reduce((s, p) => s + p.bet, 0) === 0) break;
-      const sel = await selectedSeat(page);
-      if (sel == null) break;
+  await check('Fold marks the player folded and moves on', async () => {
+    const sel = await selectedSeat(page);
+    await btn(page, '#foldBtn');
+    const g = (await S(page)).game;
+    eq(g.players[sel].folded, true, 'folded');
+    assert(await page.locator(`.seat[data-id="${g.players[sel].id}"].folded`).count() === 1, 'seat greyed');
+    assert((await selectedSeat(page)) !== sel, 'selection moved on');
+    await conserved();
+  });
+
+  await check('everyone folds to one player -> pot auto-awarded (uncalled raise returned)', async () => {
+    // Fold every live player except `keep` (the UTG raiser).
+    const keep = utg;
+    const pot = await page.evaluate(() => { const g = window.__tholdem.state.game; return g.pot + g.players.reduce((s, p) => s + p.bet, 0); });
+    const stackBefore = (await S(page)).game.players[keep].stack;
+    for (let i = 0; i < 12; i++) {
+      const g = (await S(page)).game;
+      const live = g.players.filter((p) => !p.out && !p.folded);
+      if (live.length <= 1) break;
+      const target = live.find((p) => p.seat !== keep);
+      await selectSeat(page, target.seat);
       await btn(page, '#foldBtn');
     }
-    const st = await S(page);
-    eq(st.game.pot, 0, 'pot empty after auto-award');
-    assert(st.game.players.every((p) => p.bet === 0), 'bets cleared');
-    const winner = st.game.players.find((p) => !p.folded);
-    eq(winner.stack, 10000 + 50 + 100 + 300, 'winner got blinds + caller bet');
+    const g = (await S(page)).game;
+    eq(g.pot, 0, 'pot empty after auto-award');
+    assert(g.players.every((p) => p.bet === 0), 'bets cleared');
+    eq(g.players[keep].stack, stackBefore + pot, 'last player standing gets the whole pot');
     await conserved();
     assert(await page.locator('.seat.winner').count() === 1, 'winner flashed');
   });
@@ -639,15 +694,30 @@ async function testHand() {
     void sel;
   });
 
-  await check('Split pot between two winners (odd chip goes to one)', async () => {
+  await check('uncalled part of a bet is returned when the pot is awarded', async () => {
     await btn(page, '#newHand');
     const g0 = (await S(page)).game;
-    // Add 1 odd chip via bet from UTG so the pot is odd: bet 101.
-    await page.fill('#betAmount', '101');
+    const u = await selectedSeat(page);
+    const before = g0.players[u].stack;
+    await page.fill('#betAmount', '1000');
     await btn(page, '#betPlace');
+    await btn(page, '#awardBtn'); // everyone else still live -> award mode
+    await clickSeat(page, g0.lastBlinds.bbSeat);
+    await btn(page, '#awardBtn');
+    const g = (await S(page)).game;
+    // BB (100) matched only 100 of the 1000 -> 900 goes back to the bettor.
+    eq(g.players[u].stack, before - 100, 'bettor gets 900 back');
+    await conserved('after uncalled return');
+  });
+
+  await check('Split pot between two winners', async () => {
+    await btn(page, '#newHand');
+    const g0 = (await S(page)).game;
     const { sbSeat, bbSeat } = g0.lastBlinds;
+    await selectSeat(page, sbSeat);
+    await btn(page, '#callBtn'); // SB completes to 100
     const stacks = (await S(page)).game.players.map((p) => p.stack);
-    const pot = 50 + 100 + 101;
+    const pot = await page.evaluate(() => { const g = window.__tholdem.state.game; return g.pot + g.players.reduce((s, p) => s + p.bet, 0); });
     await btn(page, '#awardBtn');
     await clickSeat(page, sbSeat);
     await clickSeat(page, bbSeat);
@@ -657,7 +727,7 @@ async function testHand() {
     const gainSb = g.players[sbSeat].stack - stacks[sbSeat];
     const gainBb = g.players[bbSeat].stack - stacks[bbSeat];
     eq(gainSb + gainBb, pot, 'whole pot split');
-    assert(Math.abs(gainSb - gainBb) === 1, 'odd chip to one winner');
+    eq(gainSb, gainBb, 'even split');
     await conserved('after split');
   });
 
@@ -693,9 +763,9 @@ async function testBust() {
 
   async function allInAndCall(winnerSeat, loserSeat) {
     await btn(page, '#newHand');
-    await clickSeat(page, winnerSeat);
+    await selectSeat(page, winnerSeat);
     await btn(page, '#allInBtn');
-    await clickSeat(page, loserSeat);
+    await selectSeat(page, loserSeat);
     await btn(page, '#callBtn');
     await btn(page, '#awardBtn');
     await clickSeat(page, winnerSeat);
@@ -729,9 +799,7 @@ async function testBust() {
   });
 
   await check('Add-on via the seat dialog', async () => {
-    await clickSeat(page, 6);
-    await clickSeat(page, 6); // second tap opens the player dialog
-    await page.waitForSelector('#modal:not([hidden])');
+    await openSeatMenu(page, 6); // tap to select, tap again for the player dialog
     await page.click('#modalBody [data-addon]');
     const st = await S(page);
     eq(st.game.players[6].addons, 1, 'addon counted');
@@ -754,8 +822,7 @@ async function testBust() {
   await check('knock out via seat dialog, then last-two → champion overlay', async () => {
     // Knock everyone out except seats 0 and 3 via the dialog.
     for (const seat of [1, 2, 5, 6, 7]) {
-      await clickSeat(page, seat);
-      if (!(await visible(page, '#modal'))) await clickSeat(page, seat);
+      await openSeatMenu(page, seat);
       await page.click('#modalBody [data-bust]');
       await page.click('#modalBody [data-ok]');
       await dismissOverlay(page);
@@ -889,6 +956,20 @@ async function testSettings() {
     assert(await visible(page, '#view-table'), 'table view');
   });
 
+  await check('Big clock mode: button and B key toggle it, and it shows the live time/blinds', async () => {
+    await tab(page, 'table');
+    await page.click('#bigClockBtn');
+    assert(await page.evaluate(() => document.body.classList.contains('mode-bigclock')), 'body.mode-bigclock');
+    assert(await visible(page, '#bigClock'), 'big clock visible');
+    const st = await S(page);
+    const l = st.config.levels[st.clock.index];
+    eq(await text(page, '#bcTime'), await text(page, '#clockTime'), 'same time as table clock');
+    eq(await text(page, '#bcBlinds'), `${fmt(l.sb)} / ${fmt(l.bb)}`, 'blinds');
+    await blurAll(page);
+    await page.keyboard.press('b');
+    assert(!(await page.evaluate(() => document.body.classList.contains('mode-bigclock'))), 'B toggles back');
+  });
+
   await check('no JS errors in settings', async () => noErrors(page));
   await page.context().close();
 }
@@ -1004,6 +1085,26 @@ async function testMobile() {
     await page.screenshot({ path: path.join(SHOTS, 'mobile-12.png'), fullPage: true });
   });
 
+  await check('mobile: 12 seat cards do not overlap each other', async () => {
+    const rects = await page.locator('.seat .seat-card').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; }));
+    const overlaps = [];
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i]; const b = rects[j];
+      const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
+      const h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+      if (w > 4 && h > 4) overlaps.push(`${i + 1}&${j + 1}`);
+    }
+    eq(overlaps, [], 'overlapping seat pairs');
+  });
+
+  await check('mobile: structure table number inputs are wide enough to show 4-digit blinds', async () => {
+    await page.evaluate(() => document.querySelector('.tab[data-view="structure"]').click());
+    await sleep(150);
+    const clipped = await page.locator('#structureBody input[type=number]').evaluateAll((els) =>
+      els.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.dataset.f + '=' + e.value));
+    eq(clipped.slice(0, 5), [], 'clipped inputs (first 5)');
+  });
+
   await check('no JS errors on mobile', async () => noErrors(page));
   await page.context().close();
 }
@@ -1077,10 +1178,67 @@ async function testEdgeCases() {
     eq(focused, 'bb', 'focus should move to the BB input');
   });
 
+  await check('Tab between chip editor inputs keeps keyboard focus', async () => {
+    await tab(page, 'chips');
+    const v = page.locator('#chipEditor .chip-row[data-i="0"] [data-f="value"]');
+    await v.click();
+    await v.fill('30');
+    await page.keyboard.press('Tab');
+    await sleep(100);
+    const tag = await page.evaluate(() => document.activeElement.tagName);
+    assert(tag !== 'BODY', 'focus lost to <body> after Tab');
+  });
+
   await context_close(page);
   page = await openApp();
 
+  await check('toast after New hand does not cover the Bet / amount controls', async () => {
+    await page.click('#newHand');
+    const hits = await page.evaluate(() => ['betPlace', 'betAmount', 'callBtn', 'foldBtn'].map((id) => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return document.getElementById(id).contains(el) ? '' : id + ' covered by ' + (el.id || el.className);
+    }).filter(Boolean));
+    eq(hits, [], 'covered controls');
+    await dismissToast(page);
+    await btn(page, '#undoBtn');
+  });
+
+  await check('"Add to pot" with no seat selected does not create chips out of thin air', async () => {
+    const before = await chipTotal(page);
+    await page.keyboard.press('Escape');
+    await page.fill('#betAmount', '5000');
+    assert(await page.isDisabled('#betPlace'), 'Bet button should be disabled with no seat selected');
+    await page.press('#betAmount', 'Enter');
+    const after = await chipTotal(page);
+    await page.fill('#betAmount', '');
+    eq(after, before, 'chips in play');
+  });
+
+  await check('a 30-second warning is announced as 30 seconds, not "one minute"', async () => {
+    await page.evaluate(() => {
+      const s = window.__tholdem.state;
+      s.config.warningMinutes = 0.5;
+      s.config.oneMinuteWarning = false;
+      window.__said = [];
+      const o = window.PokerAudio.say;
+      window.PokerAudio.say = (t, ...a) => { window.__said.push(t); return o(t, ...a); };
+    });
+    await blurAll(page);
+    if (!(await S(page)).clock.running) await page.click('#playPause');
+    await page.evaluate(() => { const c = window.__tholdem.state.clock; c.endsAt = Date.now() + 25000; c.firedWarnings = []; });
+    await sleep(400);
+    const said = await page.evaluate(() => window.__said);
+    assert(said.length > 0, 'warning spoken');
+    assert(!/one minute/.test(said.join(' ')), 'spoken: ' + said.join(' | '));
+    await page.click('#playPause');
+    await page.evaluate(() => { const s = window.__tholdem.state; s.config.warningMinutes = 5; s.config.oneMinuteWarning = true; });
+  });
+
+  const fresh = async () => { await context_close(page); page = await openApp(); return page; };
+
   await check('rapid clicking Start/Pause 11× leaves the clock running and consistent', async () => {
+    await fresh();
     for (let i = 0; i < 11; i++) await page.click('#playPause', { delay: 0 });
     const st = await S(page);
     eq(st.clock.running, true, 'running');
@@ -1088,6 +1246,8 @@ async function testEdgeCases() {
   });
 
   await check('editing the running level\'s minutes adjusts the remaining time', async () => {
+    await fresh();
+    await page.click('#playPause');
     await ff(page, 10 * 60000);
     await tab(page, 'structure');
     await setInput(page, '#structureBody tr[data-i="0"] [data-f="minutes"]', 20); // was 15 -> +5 min
@@ -1102,6 +1262,8 @@ async function testEdgeCases() {
   });
 
   await check('changing warning minutes while inside the warning window updates the banner', async () => {
+    await fresh();
+    await page.click('#playPause');
     await ff(page, 4 * 60000);
     assert(await visible(page, '#warningBanner'), 'banner from the 5-min warning');
     await tab(page, 'settings');
@@ -1115,6 +1277,7 @@ async function testEdgeCases() {
   });
 
   await check('huge numbers: 1,000,000,000 starting stack renders without JS errors', async () => {
+    await fresh();
     await tab(page, 'players');
     await setInput(page, '#startingStack', 1000000000);
     await tab(page, 'table');
@@ -1124,6 +1287,7 @@ async function testEdgeCases() {
   });
 
   await check('undo after changing player count does not desync seats and config', async () => {
+    await fresh();
     await btn(page, '#newHand'); // something on the undo stack
     await tab(page, 'players');
     await setInput(page, '#playerCount', 4);
@@ -1209,7 +1373,9 @@ async function context_close(page) {
 (async () => {
   browser = await chromium.launch({ headless: !process.env.HEADFUL });
   const suites = [testLoadAndClock, testStructure, testPlayers, testHand, testBust, testChips, testSettings, testPersistence, testMobile, testEdgeCases];
+  const only = process.env.ONLY ? new RegExp(process.env.ONLY, 'i') : null; // e.g. ONLY=edge|mobile
   for (const suite of suites) {
+    if (only && !only.test(suite.name)) continue;
     try { await suite(); } catch (e) {
       results.push({ ok: false, label: `[${section}] suite crashed`, err: e });
       console.log(`FAIL  [${section}] suite crashed: ${e.message.split('\n')[0]}`);

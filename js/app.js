@@ -43,6 +43,21 @@
     if (!Array.isArray(cfg.payoutPercents) || !cfg.payoutPercents.length) cfg.payoutPercents = def.payoutPercents;
     if (!Array.isArray(cfg.playerNames)) cfg.playerNames = def.playerNames;
     cfg.playerCount = E.clampInt(cfg.playerCount, 2, 12);
+    // Imported files are untrusted: coerce every number and color before it reaches the DOM.
+    const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+    const color = (v) => (/^#[0-9a-f]{6}$/i.test(v) ? v : '#888888');
+    cfg.levels = cfg.levels.map((l) => (l && l.type === 'break'
+      ? { type: 'break', minutes: Math.max(0.5, num(l.minutes, 10)), label: String(l.label || 'Break').slice(0, 24) }
+      : { type: 'level', sb: Math.max(0, Math.round(num(l && l.sb, 0))), bb: Math.max(0, Math.round(num(l && l.bb, 0))), ante: Math.max(0, Math.round(num(l && l.ante, 0))), minutes: Math.max(0.5, num(l && l.minutes, 15)) }));
+    cfg.chips = cfg.chips.map((c) => ({ value: Math.max(1, Math.round(num(c && c.value, 1))), color: color(c && c.color), label: String((c && c.label) || '').slice(0, 16), perPlayer: Math.max(0, Math.round(num(c && c.perPlayer, 0))) }));
+    cfg.payoutPercents = cfg.payoutPercents.map((x) => Math.max(0, num(x, 0)));
+    cfg.playerNames = cfg.playerNames.map((n) => String(n == null ? '' : n).slice(0, 24));
+    ['startingStack', 'buyIn', 'rebuyCost', 'rebuyChips', 'addonCost', 'addonChips', 'rakePercent', 'warningMinutes'].forEach((k) => { cfg[k] = Math.max(0, num(cfg[k], def[k])); });
+    cfg.startingStack = Math.max(1, Math.round(cfg.startingStack));
+    cfg.sound.volume = Math.min(1, Math.max(0, num(cfg.sound.volume, 0.8)));
+    if (!Object.prototype.hasOwnProperty.call(FELTS, cfg.theme.felt)) cfg.theme.felt = 'green';
+    if (!['leather', 'wood', 'burgundy'].includes(cfg.theme.rail)) cfg.theme.rail = 'leather';
+    cfg.currency = String(cfg.currency || '').slice(0, 3);
     return cfg;
   }
 
@@ -217,8 +232,7 @@
     const next = levels()[idx + 1];
     ui.banner = { index: idx, dismissed: false };
     playCue('warning');
-    const mins = Math.round(ms / 60000);
-    const unit = mins === 1 ? 'one minute' : mins + ' minutes';
+    const unit = spokenDuration(ms);
     let text;
     if (E.isBreak(cur)) text = `The break ends in ${unit}.`;
     else if (E.isBreak(next)) text = `Break in ${unit}.`;
@@ -226,6 +240,22 @@
     speak(text, 2.2);
     notify(text, next ? 'Next: ' + blindsText(next) : '');
     renderBanner(Date.now());
+  }
+
+  /** True when a warning shorter than the level has been crossed (i.e. the banner should show). */
+  function realWarningCrossed(rem) {
+    const len = E.levelMs(curLevel());
+    return S.clock.index < levels().length - 1 && warnings().some((w) => w < len && rem <= w);
+  }
+
+  function spokenDuration(ms) {
+    const total = Math.round(ms / 1000);
+    const m = Math.floor(total / 60);
+    const sec = total % 60;
+    const parts = [];
+    if (m) parts.push(m === 1 ? 'one minute' : m + ' minutes');
+    if (sec) parts.push(sec + ' seconds');
+    return parts.join(' and ') || 'a moment';
   }
 
   function playCue(cue) {
@@ -421,7 +451,7 @@
     setText($('clockBlinds'), onBreak ? (next ? 'Next ' + blindsText(next) : '') : blindsText(l) + (l.ante ? '  (' + fmt(l.ante) + ')' : ''));
     let state;
     if (S.clock.finished) state = 'Structure complete';
-    else if (!S.clock.running) state = S.clock.startedAt ? 'Paused' : 'Press start to shuffle up & deal';
+    else if (!S.clock.running) state = S.clock.startedAt ? 'Paused' : 'Press start';
     else state = onBreak ? 'On break' : 'Running';
     setText($('clockState'), state);
 
@@ -464,7 +494,7 @@
     setText($('avgStack'), fmt(avg));
     const l = curLevel();
     const bb = !E.isBreak(l) ? l.bb : (levels().slice(S.clock.index).find((x) => !E.isBreak(x)) || {}).bb;
-    setText($('avgBb'), bb ? Math.round(avg / bb) + ' big blinds' : '');
+    setText($('avgBb'), bb ? fmt(Math.round(avg / bb)) + ' big blinds' : '');
     setText($('chipsInPlay'), fmt(total));
     const pool = E.prizePool(cfg(), g.players);
     setText($('prizePool'), money(pool.net));
@@ -545,7 +575,7 @@
       const badges = [];
       if (!p.out && p.seat === sbSeat) badges.push('<span class="badge sb">SB</span>');
       if (!p.out && p.seat === bbSeat) badges.push('<span class="badge bb">BB</span>');
-      const stackLine = track ? `<div class="seat-stack">${esc(fmt(p.stack))}</div>` + (bb && !p.out ? `<div class="seat-stack bb">${Math.floor(p.stack / bb)} BB</div>` : '') : '';
+      const stackLine = track ? `<div class="seat-stack">${esc(fmt(p.stack))}</div>` + (bb && !p.out ? `<div class="seat-stack bb">${esc(fmt(Math.floor(p.stack / bb)))} BB</div>` : '') : '';
       html += `<div class="${cls.join(' ')}" data-id="${esc(p.id)}" title="${esc(p.name)} — tap to select, tap again for the player menu" style="left:${pos.x}%;top:${pos.y}%">
         <div class="seat-card">
           <div class="seat-badges">${badges.join('')}</div>
@@ -570,6 +600,7 @@
       html += `<div class="dealer-btn" style="left:${base.x + Math.cos(ang) * 5}%;top:${base.y + Math.sin(ang) * 6}%">D</div>`;
     }
     $('seats').innerHTML = html;
+    $('seats').classList.toggle('dense', n > 8);
   }
 
   function renderPot(bump) {
@@ -602,7 +633,7 @@
       const toCall = Math.max(0, ...g.players.map((p) => p.bet)) - sel.bet;
       info.innerHTML = `<b>${esc(sel.name)}</b> · stack ${esc(fmt(sel.stack))}` + (toCall > 0 ? ` · to call ${esc(fmt(Math.min(toCall, sel.stack)))}` : '') + (sel.folded ? ' · folded' : '') + ' <span class="muted">· tap again for rebuy / knockout · Esc to deselect</span>';
     } else {
-      info.textContent = 'Tap a seat to select a player — or build an amount and press Add to pot';
+      info.textContent = 'Tap a seat to select a player, then build a bet with the chips';
     }
     const can = !!sel && !sel.folded && !ui.awardMode;
     const toCall = sel ? Math.max(0, ...g.players.map((p) => p.bet)) - sel.bet : 0;
@@ -611,7 +642,7 @@
     $('foldBtn').disabled = !can;
     $('allInBtn').disabled = !can || sel.stack <= 0;
     $('betPlace').disabled = ui.awardMode;
-    setText($('betPlace'), sel ? 'Bet' : 'Add to pot');
+    $('betPlace').disabled = !can;
     setText($('awardBtn'), ui.awardMode ? '✓ Confirm award' : '🏆 Award pot');
     $('undoBtn').disabled = !ui.undo.length;
     $('cancelAward').hidden = !ui.awardMode;
@@ -620,7 +651,7 @@
   function renderChipTray() {
     const chips = cfg().chips.slice().sort((a, b) => a.value - b.value);
     $('chipTray').innerHTML = chips.map((c) =>
-      `<button class="chip${isLight(c.color) ? ' light' : ''}" style="--c:${esc(c.color)}" data-v="${c.value}" title="Add ${esc(fmt(c.value))}"><span>${esc(E.formatChips(c.value, true))}</span></button>`
+      `<button class="chip${isLight(c.color) ? ' light' : ''}" style="--c:${esc(c.color)}" data-v="${esc(c.value)}" title="Add ${esc(fmt(c.value))}"><span>${esc(E.formatChips(c.value, true))}</span></button>`
     ).join('');
   }
 
@@ -651,6 +682,10 @@
     const prev = ui.undo.pop();
     if (!prev) return;
     S.game = JSON.parse(prev);
+    // The table may have been resized or renamed since: keep the config in step.
+    cfg().playerCount = S.game.players.length;
+    S.game.players.forEach((p) => { cfg().playerNames[p.seat] = p.name; });
+    if (ui.selected && !S.game.players.some((p) => p.id === ui.selected)) ui.selected = null;
     exitAwardMode();
     save();
     renderTable();
@@ -722,10 +757,12 @@
     const p = selectedPlayer();
     if (!amount || ui.awardMode) return;
     if (p && p.folded) { toast(`${esc(p.name)} has folded — Esc to deselect, then Add to pot`); return; }
-    pushUndo();
     if (!p) {
-      commitGame(E.addToPot(S.game, amount), true);
-    } else {
+      toast('Tap the seat of the player putting chips in first');
+      return;
+    }
+    pushUndo();
+    {
       const res = E.placeBet(S.game, p.id, amount);
       S.game = res.game;
       selectNextToAct(p.id);
@@ -1029,17 +1066,17 @@
           <td><span class="break-pill">☕</span></td>
           <td><input type="text" data-f="label" value="${esc(l.label || 'Break')}" maxlength="24" /></td>
           <td colspan="3" class="muted">${colorUpAt(i).length ? 'Color up: ' + colorUpAt(i).map((v) => fmt(v)).join(', ') : ''}</td>
-          <td><input type="number" data-f="minutes" min="0.5" step="0.5" value="${l.minutes}" /></td>
+          <td><input type="number" data-f="minutes" min="0.5" step="0.5" value="${esc(l.minutes)}" /></td>
           <td class="muted">${starts}</td>
           <td>${tools}</td></tr>`;
       }
       return `<tr class="${cls}" data-i="${i}">
         <td class="lvl-num">${num}</td>
         <td class="muted">Level</td>
-        <td><input type="number" data-f="sb" min="0" value="${l.sb}" /></td>
-        <td><input type="number" data-f="bb" min="0" value="${l.bb}" /></td>
-        <td><input type="number" data-f="ante" min="0" value="${l.ante || 0}" /></td>
-        <td><input type="number" data-f="minutes" min="0.5" step="0.5" value="${l.minutes}" /></td>
+        <td><input type="number" data-f="sb" min="0" value="${esc(l.sb)}" /></td>
+        <td><input type="number" data-f="bb" min="0" value="${esc(l.bb)}" /></td>
+        <td><input type="number" data-f="ante" min="0" value="${esc(l.ante || 0)}" /></td>
+        <td><input type="number" data-f="minutes" min="0.5" step="0.5" value="${esc(l.minutes)}" /></td>
         <td class="muted">${starts}</td>
         <td>${tools}</td></tr>`;
     });
@@ -1059,6 +1096,22 @@
       tr.classList.toggle('is-current', i === S.clock.index);
       tr.classList.toggle('is-past', i < S.clock.index);
     });
+  }
+
+  /** Re-render an editor after the browser has moved focus (Tab), then put focus back where it went. */
+  function rerenderKeepingFocus(render) {
+    setTimeout(() => {
+      const a = document.activeElement;
+      const row = a && a.closest && a.closest('[data-i]');
+      const key = row && a.dataset.f ? { i: row.dataset.i, f: a.dataset.f, sel: a.type === 'text' ? [a.selectionStart, a.selectionEnd] : null } : null;
+      render();
+      if (!key) return;
+      const el = document.querySelector(`[data-i="${key.i}"] [data-f="${key.f}"]`);
+      if (el) {
+        el.focus();
+        if (el.select && el.type === 'number') el.select();
+      }
+    }, 0);
   }
 
   function onStructureChange(e) {
@@ -1090,7 +1143,7 @@
       if (f === 'bb' && input.closest('tr').querySelector('[data-f=sb]') && l.sb === 0) l.sb = Math.round(v / 2);
     }
     save();
-    renderStructure();
+    rerenderKeepingFocus(renderStructure);
     renderClock();
     renderStats();
     renderSeatsOnly();
@@ -1181,7 +1234,7 @@
       `<label>Seat ${p.seat + 1}<input type="text" data-seat="${p.seat}" value="${esc(p.name)}" maxlength="24" /></label>`
     ).join('');
     $('payoutEditor').innerHTML = c.payoutPercents.map((pct, i) =>
-      `<label>${ordinal(i + 1)}<input type="number" data-place="${i}" min="0" max="100" step="any" value="${pct}" /></label>`
+      `<label>${ordinal(i + 1)}<input type="number" data-place="${i}" min="0" max="100" step="any" value="${esc(pct)}" /></label>`
     ).join('');
     const sum = c.payoutPercents.reduce((s, x) => s + Number(x || 0), 0);
     const sumEl = $('payoutSum');
@@ -1251,8 +1304,10 @@
       for (let i = c.playerNames.length; i < n; i++) c.playerNames[i] = E.PLAYER_NAMES[i] || 'Player ' + (i + 1);
       c.playerCount = n;
       if (!c.payoutsCustom) c.payoutPercents = E.defaultPayoutPercents(n);
+      pushUndo();
       S.game = E.resizePlayers(S.game, c);
       ui.selected = null;
+      renderHandControls();
       save();
       renderPlayersView();
       renderTable();
@@ -1316,9 +1371,9 @@
       `<div class="chip-row" data-i="${i}">
         <div class="chip${isLight(ch.color) ? ' light' : ''}" style="--c:${esc(ch.color)}"><span>${esc(E.formatChips(ch.value, true))}</span></div>
         <input type="color" data-f="color" value="${esc(ch.color)}" title="Chip color" />
-        <label>Value<input type="number" data-f="value" min="1" value="${ch.value}" /></label>
+        <label>Value<input type="number" data-f="value" min="1" value="${esc(ch.value)}" /></label>
         <label class="chip-label">Name<input type="text" data-f="label" value="${esc(ch.label || '')}" maxlength="16" /></label>
-        <label>Per player<input type="number" data-f="perPlayer" min="0" value="${ch.perPlayer || 0}" /></label>
+        <label>Per player<input type="number" data-f="perPlayer" min="0" value="${esc(ch.perPlayer || 0)}" /></label>
         <div class="sub">= ${esc(fmt(ch.value * (ch.perPlayer || 0)))}</div>
         <button class="btn btn-ghost" data-act="del" title="Remove">✕</button>
       </div>`
@@ -1355,7 +1410,7 @@
     else ch[f] = Math.max(f === 'value' ? 1 : 0, Math.round(Number(t.value) || 0));
     if (f === 'value') cfg().chips.sort((a, b) => a.value - b.value);
     save();
-    renderChipsView();
+    rerenderKeepingFocus(renderChipsView);
     renderPot();
     renderSeatsOnly();
     renderStructure();
@@ -1483,6 +1538,7 @@
       // Re-arm warnings relative to the time left in the current level.
       const rem = E.getRemaining(S.clock, Date.now());
       S.clock.firedWarnings = warnings().filter((w) => w >= rem || w >= E.levelMs(curLevel()));
+      ui.banner = realWarningCrossed(rem) ? { index: S.clock.index, dismissed: false } : null;
       renderClock();
     }
   }
@@ -1728,7 +1784,7 @@
     const breakEnd = res.events.find((e) => e.type === 'level' && E.isBreak(levels()[e.from]) && !E.isBreak(levels()[e.index]));
     if (breakEnd && cfg().pauseAfterBreak) S.clock = E.gotoLevel(E.pauseClock(S.clock, now), levels(), breakEnd.index, now, warnings());
     const rem = E.getRemaining(S.clock, now);
-    if ((S.clock.firedWarnings || []).length && rem <= Math.max(0, ...warnings())) ui.banner = { index: S.clock.index, dismissed: false };
+    if (realWarningCrossed(rem)) ui.banner = { index: S.clock.index, dismissed: false };
     renderAll();
     let view = 'table';
     try { view = sessionStorage.getItem('tholdem.view') || 'table'; } catch (e) { /* ignore */ }

@@ -731,6 +731,8 @@
   function resizePlayers(game, config) {
     const g = clone(game);
     const count = config.playerCount;
+    // Chips already bet by removed seats stay in the pot.
+    g.players.forEach((p) => { if (p.seat >= count) g.pot += p.bet; });
     g.players = g.players.filter((p) => p.seat < count);
     for (let i = 0; i < count; i++) {
       const name = (config.playerNames && config.playerNames[i]) || 'Player ' + (i + 1);

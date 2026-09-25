@@ -27,6 +27,7 @@ THoldem runs a live Texas Hold'em tournament at home: the blind clock, the level
 ```sh
 npm start          # then open http://localhost:8080  (PORT=3000 npm start to change the port)
 npm test           # engine unit tests
+PORT=8091 npm start & npm run test:e2e   # 105 browser checks (needs Playwright)
 ```
 
 Saved data is kept separately for each way of opening the app, so a game started from `index.html` won't appear on `localhost:8080`, and the reverse.
