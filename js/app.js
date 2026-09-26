@@ -1824,6 +1824,10 @@
     showView(view);
     if (S.clock.running) requestWakeLock();
     setInterval(tick, 200);
+    // Offline / installable support when served over http(s) (not when opened as a file).
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
     // Test hook for automated QA.
     window.__tholdem = { get state() { return S; }, tick, ui, setMode };
   }

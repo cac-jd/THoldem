@@ -21,17 +21,33 @@ THoldem runs a live Texas Hold'em tournament at home: the blind clock, the level
 
 ## Run it
 
-**Easiest:** download the folder and double-click `index.html`.
+### On any phone, tablet, laptop or TV: open the website
 
-**Or with a local server** (Node 18+):
+**https://cac-jd.github.io/THoldem/** (once GitHub Pages is switched on, see below)
+
+- Nothing to install and nothing to pull: every push to GitHub updates the site within a minute or two.
+- **Phone / tablet:** open the link, then *Share → Add to Home Screen* (iPhone/iPad, Safari) or *⋮ → Install app / Add to Home screen* (Android, Chrome). It opens full-screen like an app and keeps working offline once it has loaded.
+- **Laptop / TV:** open the link, press `F` for fullscreen and `B` for the big clock. In Chrome or Edge you can also install it from the address bar.
+
+**One-time setup:** on GitHub go to *Settings → Pages*, set **Source** to *Deploy from a branch*, choose branch `claude/poker-tracker-app-qvu93u` (or `main` once merged) and folder `/ (root)`, and press **Save**.
+
+### On a laptop from a git clone: pull and launch in one click
+
+```sh
+git clone https://github.com/cac-jd/THoldem.git
+```
+
+After that, **`play.sh`** (macOS/Linux: `./play.sh`) or **`play.bat`** (Windows: double-click) pulls the latest version and opens it in your browser. It still opens your copy if you're offline.
+
+### With a local server (Node 18+)
 
 ```sh
 npm start          # then open http://localhost:8080  (PORT=3000 npm start to change the port)
 npm test           # engine unit tests
-PORT=8091 npm start & npm run test:e2e   # 105 browser checks (needs Playwright)
+PORT=8091 npm start & npm run test:e2e   # 110 browser checks (needs Playwright)
 ```
 
-Saved data is kept separately for each way of opening the app, so a game started from `index.html` won't appear on `localhost:8080`, and the reverse.
+Saved games live in each browser on each device, and separately for each way of opening the app (the website, `index.html`, `localhost`). Use *Export / Import setup* (Sound & Look tab) to copy your setup from one to another.
 
 ## Quick start
 
@@ -68,6 +84,10 @@ js/audio.js           Web Audio synth for every sound, custom clip storage (Inde
 js/app.js             UI controller: rendering, events, saving, keyboard shortcuts
 js/help.js            Content of the in-app Help tab
 server.js             Tiny zero-dependency static server for `npm start`
+sw.js                 Offline support (service worker) for the website / installed app
+manifest.webmanifest  Makes it installable to a phone or laptop home screen
+icons/                App icons
+play.sh / play.bat    Pull the latest version and open it (macOS/Linux / Windows)
 tests/                Automated tests (`npm test` runs the engine unit tests)
 *.png                 Screenshots
 ```
